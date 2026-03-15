@@ -8,7 +8,6 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
-        .package(url: "https://github.com/soffes/HotKey.git", from: "0.2.1"),
         .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.5.5"),
         .package(url: "https://github.com/tmandry/AXSwift.git", from: "0.3.2"),
     ],
@@ -16,7 +15,6 @@ let package = Package(
         .executableTarget(
             name: "Streifen",
             dependencies: [
-                "HotKey",
                 "TOMLKit",
                 "AXSwift",
             ],

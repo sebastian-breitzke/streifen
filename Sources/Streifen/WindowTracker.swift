@@ -4,6 +4,7 @@ import AXSwift
 @MainActor
 final class WindowTracker {
     var onWindowsChanged: (([TrackedWindow]) -> Void)?
+    var onAppActivated: ((NSRunningApplication) -> Void)?
 
     private var trackedWindows: [CGWindowID: TrackedWindow] = [:]
     private var observers: [pid_t: Observer] = [:]
@@ -158,7 +159,8 @@ final class WindowTracker {
     }
 
     @objc private func activeAppChanged(_ notification: Notification) {
-        // Could be used for focus tracking later
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        onAppActivated?(app)
     }
 
     // MARK: - Helpers

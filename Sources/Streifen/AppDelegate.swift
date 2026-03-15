@@ -16,8 +16,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stripLayout = StripLayout(config: config)
         hotkeyManager = HotkeyManager(workspaceManager: workspaceManager!, stripLayout: stripLayout!)
 
+        // Wire up cross-references
+        workspaceManager!.setWindowTracker(windowTracker!)
+        workspaceManager!.setStripLayout(stripLayout!)
+
         windowTracker?.onWindowsChanged = { [weak self] windows in
             self?.workspaceManager?.handleWindowsUpdate(windows)
+        }
+
+        windowTracker?.onAppActivated = { [weak self] app in
+            self?.workspaceManager?.handleAppActivated(app)
         }
 
         windowTracker?.startTracking()

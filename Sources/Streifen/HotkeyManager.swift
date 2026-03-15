@@ -1,16 +1,20 @@
 import Cocoa
-import HotKey
 import Carbon
 
 @MainActor
 final class HotkeyManager {
-    private var hotkeys: [HotKey] = []
     private weak var workspaceManager: WorkspaceManager?
     private weak var stripLayout: StripLayout?
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
 
     // Hyper = Ctrl+Alt+Cmd
-    private let hyperModifiers: NSEvent.ModifierFlags = [.control, .option, .command]
-    private let hyperShiftModifiers: NSEvent.ModifierFlags = [.control, .option, .command, .shift]
+    private let hyperMask: NSEvent.ModifierFlags = [.control, .option, .command]
+    private let hyperShiftMask: NSEvent.ModifierFlags = [.control, .option, .command, .shift]
+    private let relevantModifiers: NSEvent.ModifierFlags = [.control, .option, .command, .shift]
+
+    // Width presets: 1/4, 1/3, 1/2, 2/3, 3/4, 1
+    static let widthPresets: [CGFloat] = [0.25, 1.0/3.0, 0.50, 2.0/3.0, 0.75, 1.0]
 
     init(workspaceManager: WorkspaceManager, stripLayout: StripLayout) {
         self.workspaceManager = workspaceManager
@@ -18,150 +22,117 @@ final class HotkeyManager {
     }
 
     func registerHotkeys() {
-        // Hyper+1-9: Switch workspace
-        registerWorkspaceSwitchKeys()
-
-        // Hyper+Shift+1-9: Move window to workspace
-        registerWorkspaceMoveKeys()
-
-        // Hyper+Left/H, Hyper+Right/L: Focus navigation
-        registerFocusKeys()
-
-        // Hyper+Pad0: Cycle width
-        registerWidthKeys()
-
-        NSLog("[Streifen] Hotkeys registered")
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            Task { @MainActor in
+                self?.handleKeyEvent(event)
+            }
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            Task { @MainActor in
+                self?.handleKeyEvent(event)
+            }
+            return event
+        }
+        NSLog("[Streifen] Hotkeys registered (NSEvent monitor)")
     }
 
-    private func registerWorkspaceSwitchKeys() {
-        let numberKeys: [UInt32] = [
-            UInt32(kVK_ANSI_1), UInt32(kVK_ANSI_2), UInt32(kVK_ANSI_3),
-            UInt32(kVK_ANSI_4), UInt32(kVK_ANSI_5), UInt32(kVK_ANSI_6),
-            UInt32(kVK_ANSI_7), UInt32(kVK_ANSI_8), UInt32(kVK_ANSI_9)
+    func unregisterHotkeys() {
+        if let g = globalMonitor { NSEvent.removeMonitor(g); globalMonitor = nil }
+        if let l = localMonitor { NSEvent.removeMonitor(l); localMonitor = nil }
+    }
+
+    // MARK: - Event Routing
+
+    private func handleKeyEvent(_ event: NSEvent) {
+        let mods = event.modifierFlags.intersection(relevantModifiers)
+        let keyCode = event.keyCode
+        let isHyper = mods == hyperMask
+        let isHyperShift = mods == hyperShiftMask
+
+        guard isHyper || isHyperShift else { return }
+
+        // Number keys 1-9
+        let numberCodes: [UInt16: Int] = [
+            18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9
+        ]
+        // Numpad 1-9
+        let padCodes: [UInt16: Int] = [
+            83: 1, 84: 2, 85: 3, 86: 4, 87: 5, 88: 6, 89: 7, 91: 8, 92: 9
         ]
 
-        for (i, keyCode) in numberKeys.enumerated() {
-            let workspace = i + 1
-            let hk = HotKey(
-                carbonKeyCode: keyCode,
-                carbonModifiers: carbonModifiers(from: hyperModifiers)
-            )
-            hk.keyDownHandler = { [weak self] in
-                self?.workspaceManager?.switchTo(workspace: workspace)
-            }
-            hotkeys.append(hk)
+        // Hyper+1-9 / Pad1-9: Switch workspace
+        if isHyper, let ws = numberCodes[keyCode] ?? padCodes[keyCode] {
+            workspaceManager?.switchTo(workspace: ws)
+            return
         }
 
-        // Numpad variants
-        let padKeys: [UInt32] = [
-            UInt32(kVK_ANSI_Keypad1), UInt32(kVK_ANSI_Keypad2), UInt32(kVK_ANSI_Keypad3),
-            UInt32(kVK_ANSI_Keypad4), UInt32(kVK_ANSI_Keypad5), UInt32(kVK_ANSI_Keypad6),
-            UInt32(kVK_ANSI_Keypad7), UInt32(kVK_ANSI_Keypad8), UInt32(kVK_ANSI_Keypad9)
-        ]
-
-        for (i, keyCode) in padKeys.enumerated() {
-            let workspace = i + 1
-            let hk = HotKey(
-                carbonKeyCode: keyCode,
-                carbonModifiers: carbonModifiers(from: hyperModifiers)
-            )
-            hk.keyDownHandler = { [weak self] in
-                self?.workspaceManager?.switchTo(workspace: workspace)
-            }
-            hotkeys.append(hk)
-        }
-    }
-
-    private func registerWorkspaceMoveKeys() {
-        let numberKeys: [UInt32] = [
-            UInt32(kVK_ANSI_1), UInt32(kVK_ANSI_2), UInt32(kVK_ANSI_3),
-            UInt32(kVK_ANSI_4), UInt32(kVK_ANSI_5), UInt32(kVK_ANSI_6),
-            UInt32(kVK_ANSI_7), UInt32(kVK_ANSI_8), UInt32(kVK_ANSI_9)
-        ]
-
-        for (i, keyCode) in numberKeys.enumerated() {
-            let workspace = i + 1
-            let hk = HotKey(
-                carbonKeyCode: keyCode,
-                carbonModifiers: carbonModifiers(from: hyperShiftModifiers)
-            )
-            hk.keyDownHandler = { [weak self] in
-                guard let mgr = self?.workspaceManager else { return }
-                let ws = mgr.activeWorkspace
-                guard ws.focusIndex < ws.windows.count else { return }
-                let window = ws.windows[ws.focusIndex]
-                mgr.moveWindow(window, toWorkspace: workspace)
-            }
-            hotkeys.append(hk)
-        }
-    }
-
-    private func registerFocusKeys() {
-        // Hyper+Left / Hyper+H
-        for keyCode in [UInt32(kVK_LeftArrow), UInt32(kVK_ANSI_H)] {
-            let hk = HotKey(
-                carbonKeyCode: keyCode,
-                carbonModifiers: carbonModifiers(from: hyperModifiers)
-            )
-            hk.keyDownHandler = { [weak self] in
-                self?.workspaceManager?.focusLeft()
-            }
-            hotkeys.append(hk)
+        // Hyper+Shift+1-9 / Pad1-9: Move window to workspace
+        if isHyperShift, let ws = numberCodes[keyCode] ?? padCodes[keyCode] {
+            guard let mgr = workspaceManager else { return }
+            let active = mgr.activeWorkspace
+            guard active.focusIndex < active.windows.count else { return }
+            let window = active.windows[active.focusIndex]
+            NSLog("[Streifen] Moving window \(window.windowId) → ws\(ws)")
+            mgr.moveWindow(window, toWorkspace: ws)
+            return
         }
 
-        // Hyper+Right / Hyper+L
-        for keyCode in [UInt32(kVK_RightArrow), UInt32(kVK_ANSI_L)] {
-            let hk = HotKey(
-                carbonKeyCode: keyCode,
-                carbonModifiers: carbonModifiers(from: hyperModifiers)
-            )
-            hk.keyDownHandler = { [weak self] in
-                self?.workspaceManager?.focusRight()
-            }
-            hotkeys.append(hk)
+        // Hyper+H / Hyper+Left: Focus left
+        if isHyper && (keyCode == 4 || keyCode == 123) { // H or LeftArrow
+            workspaceManager?.focusLeft()
+            return
         }
-    }
 
-    private func registerWidthKeys() {
+        // Hyper+L / Hyper+Right: Focus right
+        if isHyper && (keyCode == 37 || keyCode == 124) { // L or RightArrow
+            workspaceManager?.focusRight()
+            return
+        }
+
+        // Hyper+Up: Width up (next bigger preset)
+        if isHyper && keyCode == 126 { // UpArrow
+            workspaceManager?.widthStep(up: true)
+            return
+        }
+
+        // Hyper+Down: Width down (next smaller preset)
+        if isHyper && keyCode == 125 { // DownArrow
+            workspaceManager?.widthStep(up: false)
+            return
+        }
+
         // Hyper+Pad0: Cycle width forward
-        let cycleKey = HotKey(
-            carbonKeyCode: UInt32(kVK_ANSI_Keypad0),
-            carbonModifiers: carbonModifiers(from: hyperModifiers)
-        )
-        cycleKey.keyDownHandler = { [weak self] in
-            self?.workspaceManager?.cycleWidth()
+        if isHyper && keyCode == 82 { // Keypad0
+            workspaceManager?.cycleWidth()
+            return
         }
-        hotkeys.append(cycleKey)
 
         // Hyper+Shift+Pad0: Cycle width backward
-        let cycleRevKey = HotKey(
-            carbonKeyCode: UInt32(kVK_ANSI_Keypad0),
-            carbonModifiers: carbonModifiers(from: hyperShiftModifiers)
-        )
-        cycleRevKey.keyDownHandler = { [weak self] in
-            self?.workspaceManager?.cycleWidth(reverse: true)
+        if isHyperShift && keyCode == 82 {
+            workspaceManager?.cycleWidth(reverse: true)
+            return
         }
-        hotkeys.append(cycleRevKey)
 
         // Hyper+PadEnter: Toggle full width
-        let fullKey = HotKey(
-            carbonKeyCode: UInt32(kVK_ANSI_KeypadEnter),
-            carbonModifiers: carbonModifiers(from: hyperModifiers)
-        )
-        fullKey.keyDownHandler = { [weak self] in
-            self?.workspaceManager?.toggleFullWidth()
+        if isHyper && keyCode == 76 { // KeypadEnter
+            workspaceManager?.toggleFullWidth()
+            return
         }
-        hotkeys.append(fullKey)
     }
 
-    // MARK: - Helpers
+    // MARK: - Width Preset Logic
 
-    private func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
-        var carbon: UInt32 = 0
-        if flags.contains(.control) { carbon |= UInt32(controlKey) }
-        if flags.contains(.option) { carbon |= UInt32(optionKey) }
-        if flags.contains(.command) { carbon |= UInt32(cmdKey) }
-        if flags.contains(.shift) { carbon |= UInt32(shiftKey) }
-        return carbon
+    /// Find nearest preset index for a given width ratio
+    static func nearestPresetIndex(for ratio: CGFloat) -> Int {
+        var bestIdx = 0
+        var bestDist = CGFloat.greatestFiniteMagnitude
+        for (i, preset) in widthPresets.enumerated() {
+            let dist = abs(ratio - preset)
+            if dist < bestDist {
+                bestDist = dist
+                bestIdx = i
+            }
+        }
+        return bestIdx
     }
 }

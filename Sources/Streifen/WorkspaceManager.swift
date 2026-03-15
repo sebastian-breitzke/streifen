@@ -51,22 +51,43 @@ final class WorkspaceManager {
     // MARK: - Window Updates
 
     func handleWindowsUpdate(_ windows: [TrackedWindow]) {
-        // Assign new windows to active workspace
         let knownIds = Set(workspaces.values.flatMap { $0.windows.map { $0.windowId } })
+        let ws = activeWorkspace
+        var added = false
 
+        // Insert new windows after the focused window
         for window in windows {
             if !knownIds.contains(window.windowId) {
-                activeWorkspace.windows.append(window)
+                let insertIdx = min(ws.focusIndex + 1, ws.windows.count)
+                ws.windows.insert(window, at: insertIdx)
+                ws.focusIndex = insertIdx
+                added = true
             }
         }
 
         // Remove windows that no longer exist
         let currentIds = Set(windows.map { $0.windowId })
-        for ws in workspaces.values {
-            ws.windows.removeAll { !currentIds.contains($0.windowId) }
+        var removed = false
+        for workspace in workspaces.values {
+            let before = workspace.windows.count
+            workspace.windows.removeAll { !currentIds.contains($0.windowId) }
+            if workspace.windows.count != before { removed = true }
         }
 
-        layoutActiveWorkspace()
+        // Clamp focus index
+        if ws.focusIndex >= ws.windows.count {
+            ws.focusIndex = max(0, ws.windows.count - 1)
+        }
+
+        // Re-layout and center on new window
+        if added || removed {
+            if added {
+                ensureWindowVisible(at: ws.focusIndex)
+            } else {
+                layoutActiveWorkspace()
+            }
+        }
+
         updateMenuBar()
     }
 
@@ -104,6 +125,7 @@ final class WorkspaceManager {
 
     func moveWindow(_ window: TrackedWindow, toWorkspace targetId: Int) {
         guard targetId >= 1 && targetId <= 9 else { return }
+        guard targetId != activeWorkspaceId else { return }
         guard let targetWs = workspaces[targetId] else { return }
 
         // Remove from current workspace
@@ -123,6 +145,11 @@ final class WorkspaceManager {
             windowTracker?.endProgrammaticUpdate()
         }
 
+        // Clamp focus index and re-layout source workspace
+        let ws = activeWorkspace
+        if ws.focusIndex >= ws.windows.count {
+            ws.focusIndex = max(0, ws.windows.count - 1)
+        }
         layoutActiveWorkspace()
         updateMenuBar()
     }
@@ -164,18 +191,35 @@ final class WorkspaceManager {
         guard let screen = NSScreen.main?.visibleFrame else { return }
         let ws = activeWorkspace
         guard index < ws.windows.count else { return }
-        let window = ws.windows[index]
 
-        // If window is off-screen to the left, scroll right
-        if window.frame.origin.x < screen.origin.x {
-            ws.scrollOffset += screen.origin.x - window.frame.origin.x + config.gap
-            layoutActiveWorkspace()
+        // Calculate where window sits in the strip (sum of previous widths)
+        let gap = config.gap
+        var windowX: CGFloat = gap
+        for i in 0..<index {
+            let w = screen.width * ws.windows[i].widthRatio - (2 * gap)
+            windowX += max(w, 200) + gap
         }
-        // If window is off-screen to the right
-        else if window.frame.maxX > screen.maxX {
-            ws.scrollOffset -= window.frame.maxX - screen.maxX + config.gap
-            layoutActiveWorkspace()
-        }
+        let windowWidth = max(screen.width * ws.windows[index].widthRatio - (2 * gap), 200)
+
+        // Center: scroll so the window's center aligns with screen center
+        let windowCenter = windowX + windowWidth / 2
+        let screenCenter = screen.width / 2
+        ws.scrollOffset = screenCenter - windowCenter
+
+        layoutActiveWorkspace()
+    }
+
+    // MARK: - App Focus (Cmd+Tab etc.)
+
+    func handleAppActivated(_ app: NSRunningApplication) {
+        let ws = activeWorkspace
+        let pid = app.processIdentifier
+
+        // Find first window of this app in active workspace
+        guard let idx = ws.windows.firstIndex(where: { $0.app.processIdentifier == pid }) else { return }
+
+        ws.focusIndex = idx
+        ensureWindowVisible(at: idx)
     }
 
     // MARK: - Width Cycling
@@ -214,11 +258,48 @@ final class WorkspaceManager {
         layoutActiveWorkspace()
     }
 
+    /// Step width up/down through presets with snap-to-nearest
+    /// Presets: 1/4, 1/3, 1/2, 2/3, 3/4, 1
+    func widthStep(up: Bool) {
+        let ws = activeWorkspace
+        guard ws.focusIndex < ws.windows.count else { return }
+        let window = ws.windows[ws.focusIndex]
+
+        let presets = HotkeyManager.widthPresets
+        let nearest = HotkeyManager.nearestPresetIndex(for: window.widthRatio)
+
+        let nextIdx: Int
+        if up {
+            nextIdx = min(nearest + 1, presets.count - 1)
+        } else {
+            nextIdx = max(nearest - 1, 0)
+        }
+
+        // Only step if we're actually moving (handle case where nearest == current)
+        if abs(window.widthRatio - presets[nearest]) > 0.02 {
+            // Not on a preset — snap to nearest first
+            window.widthRatio = presets[up ? min(nearest + 1, presets.count - 1) : nearest]
+        } else {
+            window.widthRatio = presets[nextIdx]
+        }
+
+        layoutActiveWorkspace()
+    }
+
     // MARK: - Layout
+
+    func layoutCurrentWorkspace() {
+        layoutActiveWorkspace()
+    }
 
     private func layoutActiveWorkspace() {
         guard let screen = NSScreen.main?.visibleFrame else { return }
+        windowTracker?.beginProgrammaticUpdate()
         stripLayout?.layout(workspace: activeWorkspace, screenFrame: screen, config: config)
+        // Delay re-enabling observer to let AX notifications drain
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.windowTracker?.endProgrammaticUpdate()
+        }
     }
 
     // MARK: - Crash Safety

@@ -9,6 +9,7 @@ final class TrackedWindow: @unchecked Sendable {
     var virtualX: CGFloat
     var widthRatio: CGFloat
     var category: String?
+    var resizable: Bool = true
 
     init(windowId: CGWindowID, axElement: UIElement, app: NSRunningApplication, frame: CGRect) {
         self.windowId = windowId
@@ -16,8 +17,12 @@ final class TrackedWindow: @unchecked Sendable {
         self.app = app
         self.frame = frame
         self.virtualX = frame.origin.x
-        self.widthRatio = 0.50
+        // Derive initial width ratio from actual window width vs screen
+        let screenWidth = NSScreen.main?.visibleFrame.width ?? 1920
+        self.widthRatio = min(max(frame.width / screenWidth, 0.15), 1.0)
         self.category = nil
+        // Check if window is resizable
+        self.resizable = (try? axElement.attributeIsSettable(.size)) ?? false
     }
 
     var bundleId: String? {
@@ -33,16 +38,18 @@ final class TrackedWindow: @unchecked Sendable {
             try axElement.setAttribute(.position, value: point)
             frame.origin = point
         } catch {
-            NSLog("[Streifen] Failed to set position for window \(windowId): \(error)")
+            // Silently ignore — window may have been destroyed
         }
     }
 
     func setSize(_ size: CGSize) {
+        guard resizable else { return }
         do {
             try axElement.setAttribute(.size, value: size)
             frame.size = size
         } catch {
-            NSLog("[Streifen] Failed to set size for window \(windowId): \(error)")
+            // Mark as non-resizable to avoid future attempts
+            resizable = false
         }
     }
 
