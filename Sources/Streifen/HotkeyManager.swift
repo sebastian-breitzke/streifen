@@ -165,6 +165,81 @@ final class HotkeyManager {
             workspaceManager?.toggleFullWidth()
             return
         }
+
+        // Hyper+Shift+F12: Dump focused window AX properties
+        if isHyperShift && keyCode == 111 { // F12
+            dumpFocusedWindow()
+            return
+        }
+    }
+
+    // MARK: - Debug
+
+    /// Dump all AX properties of the currently focused window to the log.
+    private func dumpFocusedWindow() {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            slog("⚠️ DUMP: No frontmost app")
+            return
+        }
+
+        let pid = frontApp.processIdentifier
+        let appRef = AXUIElementCreateApplication(pid)
+        var focusedRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(appRef, kAXFocusedWindowAttribute as CFString, &focusedRef)
+        guard result == .success, let windowEl = focusedRef else {
+            slog("⚠️ DUMP: No focused window for \(frontApp.localizedName ?? "?")")
+            return
+        }
+
+        let axEl = windowEl as! AXUIElement
+
+        // Get window ID
+        var windowId: CGWindowID = 0
+        _AXUIElementGetWindow(axEl, &windowId)
+
+        // Read common attributes
+        func axStr(_ attr: String) -> String {
+            var val: CFTypeRef?
+            AXUIElementCopyAttributeValue(axEl, attr as CFString, &val)
+            return val.map { "\($0)" } ?? "nil"
+        }
+        func axPoint(_ attr: String) -> CGPoint? {
+            var val: CFTypeRef?
+            AXUIElementCopyAttributeValue(axEl, attr as CFString, &val)
+            guard let v = val else { return nil }
+            var point = CGPoint.zero
+            AXValueGetValue(v as! AXValue, .cgPoint, &point)
+            return point
+        }
+        func axSize(_ attr: String) -> CGSize? {
+            var val: CFTypeRef?
+            AXUIElementCopyAttributeValue(axEl, attr as CFString, &val)
+            guard let v = val else { return nil }
+            var size = CGSize.zero
+            AXValueGetValue(v as! AXValue, .cgSize, &size)
+            return size
+        }
+
+        let pos = axPoint(kAXPositionAttribute as String)
+        let size = axSize(kAXSizeAttribute as String)
+
+        // Check if tracked
+        let isTracked = workspaceManager?.activeWorkspace.windows.contains(where: { $0.windowId == windowId }) ?? false
+
+        slog("🔍 SUSPICIOUS WINDOW DUMP")
+        slog("  app: \(frontApp.localizedName ?? "?") (\(frontApp.bundleIdentifier ?? "?"))")
+        slog("  windowId: \(windowId)")
+        slog("  title: \(axStr(kAXTitleAttribute as String))")
+        slog("  role: \(axStr(kAXRoleAttribute as String))")
+        slog("  subrole: \(axStr(kAXSubroleAttribute as String))")
+        slog("  main: \(axStr(kAXMainAttribute as String))")
+        slog("  modal: \(axStr(kAXModalAttribute as String))")
+        slog("  fullScreen: \(axStr("AXFullScreen"))")
+        slog("  identifier: \(axStr(kAXIdentifierAttribute as String))")
+        slog("  pos: \(pos.map { "\($0)" } ?? "nil")")
+        slog("  size: \(size.map { "\($0)" } ?? "nil")")
+        slog("  tracked: \(isTracked)")
+        slog("  --- END DUMP ---")
     }
 
     // MARK: - Width Preset Logic
