@@ -35,6 +35,10 @@ final class WorkspaceManager {
             self, selector: #selector(handleSwitchNotification(_:)),
             name: .switchWorkspace, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleResetNotification),
+            name: .resetAllWorkspaces, object: nil
+        )
     }
 
     func setWindowTracker(_ tracker: WindowTracker) {
@@ -83,7 +87,13 @@ final class WorkspaceManager {
         layoutActiveWorkspace()
         windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
-        NSLog("[Streifen] Initial sort: \(windows.count) windows across workspaces")
+
+        // Log assignment details
+        for (wsId, ws) in workspaces.sorted(by: { $0.key < $1.key }) where !ws.windows.isEmpty {
+            let names = ws.windows.map { "\($0.app.localizedName ?? "?")(\($0.windowId))" }.joined(separator: ", ")
+            slog("  WS \(wsId): \(names)")
+        }
+        slog("Initial sort: \(windows.count) windows")
     }
 
     // MARK: - Window Updates
@@ -194,7 +204,8 @@ final class WorkspaceManager {
         windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
 
-        NSLog("[Streifen] Switched to workspace \(targetId)")
+        saveState()
+        slog("Switched to workspace \(targetId)")
     }
 
     // MARK: - Move Window to Workspace
@@ -256,7 +267,7 @@ final class WorkspaceManager {
             try window.axElement.setAttribute(.main, value: true)
             window.app.activate()
         } catch {
-            NSLog("[Streifen] Focus failed: \(error)")
+            slog("Focus failed: \(error)")
         }
 
         // Scroll strip to ensure focused window is visible
@@ -278,15 +289,17 @@ final class WorkspaceManager {
         let windowWidth = max(screen.width * ws.windows[index].widthRatio - (2 * gap), 200)
 
         // Scroll-into-view: only scroll if focused window isn't fully visible
+        // Tolerance of 5px to avoid scrolling on rounding errors
+        let tolerance: CGFloat = 5
         let currentLeft = windowX + ws.scrollOffset
         let currentRight = currentLeft + windowWidth
         let screenLeft = gap
         let screenRight = screen.width - gap
 
-        if currentLeft < screenLeft {
+        if currentLeft < screenLeft - tolerance {
             // Window is off-screen left — scroll right to show its left edge
             ws.scrollOffset += screenLeft - currentLeft
-        } else if currentRight > screenRight {
+        } else if currentRight > screenRight + tolerance {
             // Window is off-screen right — scroll left to show its right edge
             ws.scrollOffset -= currentRight - screenRight
         }
@@ -334,7 +347,7 @@ final class WorkspaceManager {
             ws.windows.append(window)
             ws.focusIndex = ws.windows.count - 1
             ensureWindowVisible(at: ws.focusIndex)
-            NSLog("[Streifen] Pulled follow-app \(bundleId) to workspace \(activeWorkspaceId)")
+            slog("Pulled follow-app \(bundleId) to workspace \(activeWorkspaceId)")
             return
         }
 
@@ -346,7 +359,7 @@ final class WorkspaceManager {
                 activeWorkspace.focusIndex = idx
                 ensureWindowVisible(at: idx)
             }
-            NSLog("[Streifen] Auto-switched to workspace \(sourceWsId) (window focus)")
+            slog("Auto-switched to workspace \(sourceWsId) (window focus)")
         }
     }
 
@@ -463,9 +476,141 @@ final class WorkspaceManager {
         }
     }
 
+    // MARK: - Reset
+
+    func resetAll() {
+        windowTracker?.beginProgrammaticUpdate()
+
+        // Move all windows to workspace 1
+        let ws1 = workspaces[1]!
+        for ws in workspaces.values where ws !== ws1 {
+            ws1.windows.append(contentsOf: ws.windows)
+            ws.windows.removeAll()
+            ws.scrollOffset = 0
+        }
+
+        activeWorkspaceId = 1
+        ws1.isVisible = true
+        ws1.scrollOffset = 0
+        ws1.focusIndex = 0
+
+        layoutActiveWorkspace()
+        windowTracker?.endProgrammaticUpdate()
+        updateMenuBar()
+        slog("Reset — all windows moved to workspace 1")
+    }
+
+    // MARK: - State Persistence
+
+    private static let stateURL: URL = {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Streifen", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("state.json")
+    }()
+
+    func saveState() {
+        var state: [[String: Any]] = []
+        for (wsId, ws) in workspaces {
+            for window in ws.windows {
+                state.append([
+                    "windowId": Int(window.windowId),
+                    "workspace": wsId,
+                    "widthRatio": Double(window.widthRatio),
+                    "bundleId": window.bundleId ?? "",
+                    "title": window.title,
+                ])
+            }
+        }
+        let wrapper: [String: Any] = [
+            "activeWorkspace": activeWorkspaceId,
+            "scrollOffsets": Dictionary(uniqueKeysWithValues: workspaces.map { ("\($0.key)", $0.value.scrollOffset) }),
+            "windows": state,
+            "timestamp": Date().timeIntervalSince1970,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: wrapper, options: .prettyPrinted) else { return }
+        try? data.write(to: Self.stateURL)
+        slog("State saved (\(state.count) windows)")
+    }
+
+    /// Restore state if saved less than 15 minutes ago. Returns true if restored.
+    func restoreState(_ currentWindows: [TrackedWindow]) -> Bool {
+        guard let data = try? Data(contentsOf: Self.stateURL),
+              let wrapper = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let timestamp = wrapper["timestamp"] as? Double,
+              let windowStates = wrapper["windows"] as? [[String: Any]] else { return false }
+
+        // Only restore if fresh (< 15 min)
+        let age = Date().timeIntervalSince1970 - timestamp
+        guard age < 900 else {
+            slog("State too old (\(Int(age))s), ignoring")
+            return false
+        }
+
+        let savedActiveWs = wrapper["activeWorkspace"] as? Int ?? 1
+        let scrollOffsets = wrapper["scrollOffsets"] as? [String: Double] ?? [:]
+
+        // Build lookups: try windowId first, fallback to bundleId+title
+        var idLookup: [CGWindowID: (Int, CGFloat)] = [:]
+        var keyLookup: [String: (Int, CGFloat)] = [:]
+        for entry in windowStates {
+            guard let wsId = entry["workspace"] as? Int,
+                  let ratio = entry["widthRatio"] as? Double else { continue }
+            if let wid = entry["windowId"] as? Int {
+                idLookup[CGWindowID(wid)] = (wsId, CGFloat(ratio))
+            }
+            if let bid = entry["bundleId"] as? String, let title = entry["title"] as? String {
+                keyLookup["\(bid)|\(title)"] = (wsId, CGFloat(ratio))
+            }
+        }
+
+        guard !idLookup.isEmpty || !keyLookup.isEmpty else { return false }
+
+        // Use passed-in windows (from windowTracker) since workspaces are empty at startup
+        let allWindows = currentWindows
+        for ws in workspaces.values { ws.windows.removeAll() }
+
+        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let offscreen = CGPoint(x: screen.maxX + screen.width, y: screen.maxY + screen.height)
+        var restored = 0
+
+        for window in allWindows {
+            let match = idLookup[window.windowId]
+                ?? keyLookup["\(window.bundleId ?? "")|\(window.title)"]
+
+            if let (wsId, ratio) = match {
+                window.widthRatio = ratio
+                workspaces[wsId]?.windows.append(window)
+                if wsId != savedActiveWs {
+                    window.setPosition(offscreen)
+                }
+                restored += 1
+            } else {
+                // Unknown window → active workspace
+                workspaces[savedActiveWs]?.windows.append(window)
+            }
+        }
+
+        // Restore scroll offsets
+        for (key, offset) in scrollOffsets {
+            if let wsId = Int(key) {
+                workspaces[wsId]?.scrollOffset = CGFloat(offset)
+            }
+        }
+
+        activeWorkspaceId = savedActiveWs
+        for ws in workspaces.values { ws.isVisible = (ws.id == savedActiveWs) }
+
+        layoutActiveWorkspace()
+        updateMenuBar()
+        slog("State restored (\(restored)/\(allWindows.count) windows matched, age \(Int(age))s)")
+        return true
+    }
+
     // MARK: - Crash Safety
 
     func restoreAllWindowsOnScreen() {
+        saveState()  // Save before crash recovery
         guard let screen = NSScreen.main?.visibleFrame else { return }
         let startX = screen.origin.x + 20
         let startY = screen.origin.y + 20
@@ -500,5 +645,9 @@ final class WorkspaceManager {
     @objc private func handleSwitchNotification(_ notification: Notification) {
         guard let ws = notification.userInfo?["workspace"] as? Int else { return }
         switchTo(workspace: ws)
+    }
+
+    @objc private func handleResetNotification() {
+        resetAll()
     }
 }

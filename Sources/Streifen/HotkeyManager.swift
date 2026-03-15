@@ -42,7 +42,7 @@ final class HotkeyManager {
             }
             return event
         }
-        NSLog("[Streifen] Hotkeys registered (NSEvent monitor)")
+        slog("Hotkeys registered (NSEvent monitor)")
     }
 
     func unregisterHotkeys() {
@@ -81,7 +81,7 @@ final class HotkeyManager {
             let active = mgr.activeWorkspace
             guard active.focusIndex < active.windows.count else { return }
             let window = active.windows[active.focusIndex]
-            NSLog("[Streifen] Moving window \(window.windowId) → ws\(ws)")
+            slog("Moving window \(window.windowId) → ws\(ws)")
             mgr.moveWindow(window, toWorkspace: ws)
             return
         }

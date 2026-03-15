@@ -29,9 +29,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.workspaceManager?.handleWindowFocused(windowId: windowId)
         }
 
-        // Discover windows and do initial sort before wiring up live updates
+        // Discover windows — try to restore saved state, fallback to initial sort
         windowTracker?.startTracking()
-        workspaceManager?.initialSort(windowTracker!.allWindows)
+        let discovered = windowTracker!.allWindows
+        if !(workspaceManager?.restoreState(discovered) ?? false) {
+            workspaceManager?.initialSort(discovered)
+        }
 
         windowTracker?.onWindowsChanged = { [weak self] windows in
             self?.workspaceManager?.handleWindowsUpdate(windows)
@@ -39,13 +42,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotkeyManager?.registerHotkeys()
 
-        NSLog("[Streifen] Started — tracking windows")
+        slog("Started — tracking windows")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         // Crash safety: move all windows back on-screen
         workspaceManager?.restoreAllWindowsOnScreen()
-        NSLog("[Streifen] Shutdown — windows restored")
+        slog("Shutdown — windows restored")
     }
 
     private func killOtherInstances() {
@@ -57,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for app in all {
             if app.processIdentifier != myPid,
                app.localizedName == myName || app.bundleIdentifier == "de.s16e.streifen" {
-                NSLog("[Streifen] Killing old instance (pid \(app.processIdentifier))")
+                slog("Killing old instance (pid \(app.processIdentifier))")
                 app.terminate()
             }
         }
@@ -66,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func checkAccessibility() -> Bool {
         let trusted = UIElement.isProcessTrusted(withPrompt: true)
         if !trusted {
-            NSLog("[Streifen] Accessibility not granted — prompting user")
+            slog("Accessibility not granted — prompting user")
         }
         return trusted
     }

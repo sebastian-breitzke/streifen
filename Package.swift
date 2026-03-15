@@ -19,6 +19,9 @@ let package = Package(
                 "AXSwift",
             ],
             path: "Sources/Streifen",
+            resources: [
+                .copy("Resources"),
+            ],
             linkerSettings: [
                 .linkedFramework("Cocoa"),
                 .linkedFramework("Carbon"),

@@ -23,6 +23,12 @@ struct MenuBarView: View {
         Text("\(viewModel.totalWindows) windows tracked")
             .foregroundStyle(.secondary)
 
+        Button("Reset — all to WS 1") {
+            viewModel.resetAll()
+        }
+
+        Divider()
+
         Button("Quit Streifen") {
             NSApplication.shared.terminate(nil)
         }
@@ -51,8 +57,13 @@ final class MenuBarViewModel: ObservableObject {
         self.windowCounts = windowCounts
         self.totalWindows = total
     }
+
+    func resetAll() {
+        NotificationCenter.default.post(name: .resetAllWorkspaces, object: nil)
+    }
 }
 
 extension Notification.Name {
     static let switchWorkspace = Notification.Name("streifen.switchWorkspace")
+    static let resetAllWorkspaces = Notification.Name("streifen.resetAll")
 }

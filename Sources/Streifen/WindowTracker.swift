@@ -50,7 +50,17 @@ final class WindowTracker {
         notifyChanged()
     }
 
+    // Apps that should never be tracked (overlays, screen tools, utilities)
+    private static let ignoredBundleIds: Set<String> = [
+        "pl.maketheweb.cleanshotx",         // CleanShot X
+        "com.surteesstudios.Bartender",      // Bartender
+        "com.hegenberg.BetterSnapTool",      // BetterSnapTool
+        "com.betterdisplay.BetterDisplay",   // BetterDisplay
+        "de.s16e.streifen",                  // Ourselves
+    ]
+
     private func discoverWindows(for app: NSRunningApplication) {
+        if let bid = app.bundleIdentifier, Self.ignoredBundleIds.contains(bid) { return }
         guard let appElement = AXSwift.Application(app) else { return }
         guard let axWindows = try? appElement.windows() else { return }
 
@@ -61,13 +71,23 @@ final class WindowTracker {
             // Skip tiny windows (toolbars, popups)
             guard size.width >= 100 && size.height >= 100 else { continue }
 
-            // Skip floating/popup windows: dialogs, sheets, utility panels, small windows
+            // Skip floating/popup windows: dialogs, sheets, utility panels
             let subrole: String? = try? axWindow.attribute(.subrole)
-            let floatingSubroles: Set<String> = [
-                "AXDialog", "AXSheet", "AXFloatingWindow",
-                "AXSystemDialog", "AXSystemFloatingWindow"
-            ]
-            if let sr = subrole, floatingSubroles.contains(sr) { continue }
+            let isJetBrains = app.bundleIdentifier?.hasPrefix("com.jetbrains.") == true
+
+            if isJetBrains {
+                // JetBrains has unreliable subroles — main windows report AXDialog
+                // or AXStandardWindow depending on dialog state. Use alternative filtering.
+                if let sr = subrole, sr == "AXUnknown" || sr == "AXFloatingWindow" { continue }
+                let title: String? = try? axWindow.attribute(.title)
+                if title == nil || title!.isEmpty { continue }
+            } else {
+                let floatingSubroles: Set<String> = [
+                    "AXDialog", "AXSheet", "AXFloatingWindow",
+                    "AXSystemDialog", "AXSystemFloatingWindow"
+                ]
+                if let sr = subrole, floatingSubroles.contains(sr) { continue }
+            }
 
             // Skip small windows (Calculator, color pickers, etc.)
             guard size.width >= 400 || size.height >= 400 else { continue }
@@ -108,7 +128,7 @@ final class WindowTracker {
             try observer.addNotification(.resized, forElement: appElement)
             try observer.addNotification(.focusedWindowChanged, forElement: appElement)
         } catch {
-            NSLog("[Streifen] Observer setup failed for pid \(pid): \(error)")
+            slog("Observer setup failed for pid \(pid): \(error)")
         }
 
         observers[pid] = observer
@@ -123,11 +143,30 @@ final class WindowTracker {
                 discoverWindows(for: app)
             }
         case .uiElementDestroyed:
-            let toRemove = trackedWindows.filter { $0.value.app.processIdentifier == pid }
-            for (id, window) in toRemove {
-                if (try? window.axElement.attribute(.position) as CGPoint?) == nil {
-                    trackedWindows.removeValue(forKey: id)
+            // Try to match the destroyed element directly
+            if let wid = getWindowId(from: element) {
+                trackedWindows.removeValue(forKey: wid)
+            } else {
+                // Fallback: remove any windows of this app that are no longer readable
+                let candidates = trackedWindows.filter { $0.value.app.processIdentifier == pid }
+                for (id, window) in candidates {
+                    if (try? window.axElement.attribute(.position) as CGPoint?) == nil {
+                        trackedWindows.removeValue(forKey: id)
+                    }
                 }
+            }
+            // Delayed second pass — catch windows that were still readable during the first check
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self else { return }
+                let candidates = self.trackedWindows.filter { $0.value.app.processIdentifier == pid }
+                var changed = false
+                for (id, window) in candidates {
+                    if (try? window.axElement.attribute(.position) as CGPoint?) == nil {
+                        self.trackedWindows.removeValue(forKey: id)
+                        changed = true
+                    }
+                }
+                if changed { self.notifyChanged() }
             }
         case .focusedWindowChanged:
             // element is the newly focused window — find its ID
