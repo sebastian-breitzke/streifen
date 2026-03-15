@@ -5,6 +5,7 @@ import AXSwift
 final class WindowTracker {
     var onWindowsChanged: (([TrackedWindow]) -> Void)?
     var onAppActivated: ((NSRunningApplication) -> Void)?
+    var onWindowFocused: ((CGWindowID) -> Void)?
 
     private var trackedWindows: [CGWindowID: TrackedWindow] = [:]
     private var observers: [pid_t: Observer] = [:]
@@ -60,6 +61,17 @@ final class WindowTracker {
             // Skip tiny windows (toolbars, popups)
             guard size.width >= 100 && size.height >= 100 else { continue }
 
+            // Skip floating/popup windows: dialogs, sheets, utility panels, small windows
+            let subrole: String? = try? axWindow.attribute(.subrole)
+            let floatingSubroles: Set<String> = [
+                "AXDialog", "AXSheet", "AXFloatingWindow",
+                "AXSystemDialog", "AXSystemFloatingWindow"
+            ]
+            if let sr = subrole, floatingSubroles.contains(sr) { continue }
+
+            // Skip small windows (Calculator, color pickers, etc.)
+            guard size.width >= 400 || size.height >= 400 else { continue }
+
             let frame = CGRect(origin: position, size: size)
             let windowId = getWindowId(from: axWindow) ?? 0
 
@@ -94,6 +106,7 @@ final class WindowTracker {
             try observer.addNotification(.uiElementDestroyed, forElement: appElement)
             try observer.addNotification(.moved, forElement: appElement)
             try observer.addNotification(.resized, forElement: appElement)
+            try observer.addNotification(.focusedWindowChanged, forElement: appElement)
         } catch {
             NSLog("[Streifen] Observer setup failed for pid \(pid): \(error)")
         }
@@ -115,6 +128,11 @@ final class WindowTracker {
                 if (try? window.axElement.attribute(.position) as CGPoint?) == nil {
                     trackedWindows.removeValue(forKey: id)
                 }
+            }
+        case .focusedWindowChanged:
+            // element is the newly focused window — find its ID
+            if let wid = getWindowId(from: element) {
+                onWindowFocused?(wid)
             }
         case .moved, .resized:
             for (_, window) in trackedWindows where window.app.processIdentifier == pid {

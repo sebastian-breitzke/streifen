@@ -17,9 +17,8 @@ final class TrackedWindow: @unchecked Sendable {
         self.app = app
         self.frame = frame
         self.virtualX = frame.origin.x
-        // Derive initial width ratio from actual window width vs screen
-        let screenWidth = NSScreen.main?.visibleFrame.width ?? 1920
-        self.widthRatio = min(max(frame.width / screenWidth, 0.15), 1.0)
+        // Default width ratio based on screen aspect ratio
+        self.widthRatio = TrackedWindow.defaultWidthRatio()
         self.category = nil
         // Check if window is resizable
         self.resizable = (try? axElement.attributeIsSettable(.size)) ?? false
@@ -56,5 +55,19 @@ final class TrackedWindow: @unchecked Sendable {
     func setFrame(_ rect: CGRect) {
         setPosition(rect.origin)
         setSize(rect.size)
+    }
+
+    /// Default width ratio based on screen aspect ratio:
+    /// Ultrawide (≥2.3:1) → 1/3, Wide (≥1.5:1) → 1/2, Normal → 1/1
+    static func defaultWidthRatio() -> CGFloat {
+        guard let screen = NSScreen.main?.visibleFrame else { return 0.5 }
+        let aspect = screen.width / screen.height
+        if aspect >= 2.3 {
+            return 1.0 / 3.0  // ultrawide
+        } else if aspect >= 1.5 {
+            return 0.5         // wide (16:10, 16:9)
+        } else {
+            return 1.0         // normal / portrait
+        }
     }
 }

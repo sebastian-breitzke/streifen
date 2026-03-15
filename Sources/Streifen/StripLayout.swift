@@ -26,12 +26,12 @@ final class StripLayout {
             // Calculate virtual position
             window.virtualX = x
 
-            // Clamp to screen bounds — off-screen windows get 1px margin
+            // Clamp to screen bounds
             let visibleFrame: CGRect
             if x + clampedWidth < screenFrame.origin.x {
-                // Fully off-screen left: park just off-screen
+                // Fully off-screen left: park off-screen
                 visibleFrame = CGRect(
-                    x: screenFrame.origin.x - clampedWidth + 1,
+                    x: screenFrame.origin.x - clampedWidth - 1,
                     y: y,
                     width: clampedWidth,
                     height: availableHeight

@@ -1,4 +1,5 @@
 import Cocoa
+import AXSwift
 
 @MainActor
 final class Workspace {
@@ -48,6 +49,43 @@ final class WorkspaceManager {
         workspaces[activeWorkspaceId]!
     }
 
+    // MARK: - Initial Sort
+
+    /// Sort all windows into workspaces at startup based on pinned config
+    func initialSort(_ windows: [TrackedWindow]) {
+        windowTracker?.beginProgrammaticUpdate()
+        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let offscreen = CGPoint(x: screen.maxX + screen.width, y: screen.maxY + screen.height)
+
+        // Track which pinned bundle IDs already have their first window placed
+        var pinnedPlaced: Set<String> = []
+
+        for window in windows {
+            let bundleId = window.bundleId ?? ""
+            let targetWs: Workspace
+
+            if let pinnedWsId = config.pinnedApps[bundleId],
+               let pinnedWs = workspaces[pinnedWsId],
+               !pinnedPlaced.contains(bundleId) {
+                targetWs = pinnedWs
+                pinnedPlaced.insert(bundleId)
+            } else {
+                targetWs = activeWorkspace
+            }
+
+            targetWs.windows.append(window)
+
+            if targetWs !== activeWorkspace {
+                window.setPosition(offscreen)
+            }
+        }
+
+        layoutActiveWorkspace()
+        windowTracker?.endProgrammaticUpdate()
+        updateMenuBar()
+        NSLog("[Streifen] Initial sort: \(windows.count) windows across workspaces")
+    }
+
     // MARK: - Window Updates
 
     func handleWindowsUpdate(_ windows: [TrackedWindow]) {
@@ -55,12 +93,38 @@ final class WorkspaceManager {
         let ws = activeWorkspace
         var added = false
 
-        // Insert new windows after the focused window
+        // Insert new windows — pinned apps go to their workspace (first window only)
         for window in windows {
             if !knownIds.contains(window.windowId) {
-                let insertIdx = min(ws.focusIndex + 1, ws.windows.count)
-                ws.windows.insert(window, at: insertIdx)
-                ws.focusIndex = insertIdx
+                let bundleId = window.bundleId ?? ""
+                let targetWs: Workspace
+
+                if let pinnedWsId = config.pinnedApps[bundleId],
+                   let pinnedWs = workspaces[pinnedWsId],
+                   !pinnedWs.windows.contains(where: { $0.bundleId == bundleId }) {
+                    // First window of pinned app → target workspace
+                    targetWs = pinnedWs
+                } else {
+                    // Normal + additional pinned windows → active workspace
+                    targetWs = ws
+                }
+
+                let insertIdx = (targetWs === ws)
+                    ? min(ws.focusIndex + 1, ws.windows.count)
+                    : targetWs.windows.count
+                targetWs.windows.insert(window, at: insertIdx)
+
+                if targetWs === ws {
+                    ws.focusIndex = insertIdx
+                }
+
+                // If target is not the active workspace, move off-screen
+                if targetWs !== ws {
+                    let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
+                    let offscreen = CGPoint(x: screen.maxX + screen.width, y: screen.maxY + screen.height)
+                    window.setPosition(offscreen)
+                }
+
                 added = true
             }
         }
@@ -79,8 +143,20 @@ final class WorkspaceManager {
             ws.focusIndex = max(0, ws.windows.count - 1)
         }
 
-        // Re-layout and center on new window
-        if added || removed {
+        // Sync widthRatio from actual window size (manual resize)
+        var resized = false
+        if !added && !removed, let screen = NSScreen.main?.visibleFrame {
+            for window in ws.windows {
+                let actualRatio = (window.frame.width + 2 * config.gap) / screen.width
+                if abs(actualRatio - window.widthRatio) > 0.02 {
+                    window.widthRatio = actualRatio
+                    resized = true
+                }
+            }
+        }
+
+        // Re-layout strip
+        if added || removed || resized {
             if added {
                 ensureWindowVisible(at: ws.focusIndex)
             } else {
@@ -201,10 +277,20 @@ final class WorkspaceManager {
         }
         let windowWidth = max(screen.width * ws.windows[index].widthRatio - (2 * gap), 200)
 
-        // Center: scroll so the window's center aligns with screen center
-        let windowCenter = windowX + windowWidth / 2
-        let screenCenter = screen.width / 2
-        ws.scrollOffset = screenCenter - windowCenter
+        // Scroll-into-view: only scroll if focused window isn't fully visible
+        let currentLeft = windowX + ws.scrollOffset
+        let currentRight = currentLeft + windowWidth
+        let screenLeft = gap
+        let screenRight = screen.width - gap
+
+        if currentLeft < screenLeft {
+            // Window is off-screen left — scroll right to show its left edge
+            ws.scrollOffset += screenLeft - currentLeft
+        } else if currentRight > screenRight {
+            // Window is off-screen right — scroll left to show its right edge
+            ws.scrollOffset -= currentRight - screenRight
+        }
+        // else: already fully visible, don't scroll
 
         layoutActiveWorkspace()
     }
@@ -212,14 +298,89 @@ final class WorkspaceManager {
     // MARK: - App Focus (Cmd+Tab etc.)
 
     func handleAppActivated(_ app: NSRunningApplication) {
-        let ws = activeWorkspace
+        // App-level activation — try to find focused window via AX
         let pid = app.processIdentifier
+        guard let appElement = AXSwift.Application(forProcessID: pid),
+              let focusedWindow: UIElement = try? appElement.attribute(.focusedWindow),
+              let wid = getWindowId(from: focusedWindow) else {
+            // Fallback: find first window of this app in active workspace
+            let ws = activeWorkspace
+            if let idx = ws.windows.firstIndex(where: { $0.app.processIdentifier == pid }) {
+                ws.focusIndex = idx
+                ensureWindowVisible(at: idx)
+            }
+            return
+        }
+        handleWindowFocused(windowId: wid)
+    }
 
-        // Find first window of this app in active workspace
-        guard let idx = ws.windows.firstIndex(where: { $0.app.processIdentifier == pid }) else { return }
+    func handleWindowFocused(windowId: CGWindowID) {
+        let ws = activeWorkspace
 
-        ws.focusIndex = idx
-        ensureWindowVisible(at: idx)
+        // Already in active workspace? Just update focus index.
+        if let idx = ws.windows.firstIndex(where: { $0.windowId == windowId }) {
+            ws.focusIndex = idx
+            ensureWindowVisible(at: idx)
+            return
+        }
+
+        // Find which workspace has this window
+        guard let (sourceWsId, sourceWs, window) = findWindow(byId: windowId) else { return }
+        let bundleId = window.bundleId ?? ""
+
+        // Follow app? Pull to current workspace.
+        if config.followApps.contains(bundleId) {
+            sourceWs.windows.removeAll { $0.windowId == windowId }
+            ws.windows.append(window)
+            ws.focusIndex = ws.windows.count - 1
+            ensureWindowVisible(at: ws.focusIndex)
+            NSLog("[Streifen] Pulled follow-app \(bundleId) to workspace \(activeWorkspaceId)")
+            return
+        }
+
+        // Window is on another workspace → switch to that workspace
+        if sourceWsId != activeWorkspaceId {
+            switchTo(workspace: sourceWsId)
+            // Update focus index in the target workspace
+            if let idx = activeWorkspace.windows.firstIndex(where: { $0.windowId == windowId }) {
+                activeWorkspace.focusIndex = idx
+                ensureWindowVisible(at: idx)
+            }
+            NSLog("[Streifen] Auto-switched to workspace \(sourceWsId) (window focus)")
+        }
+    }
+
+    private func findWindow(byId windowId: CGWindowID) -> (Int, Workspace, TrackedWindow)? {
+        for (wsId, ws) in workspaces {
+            if let window = ws.windows.first(where: { $0.windowId == windowId }) {
+                return (wsId, ws, window)
+            }
+        }
+        return nil
+    }
+
+    private func getWindowId(from element: UIElement) -> CGWindowID? {
+        var windowId: CGWindowID = 0
+        let result = _AXUIElementGetWindow(element.element, &windowId)
+        return result == .success ? windowId : nil
+    }
+
+    // MARK: - Reorder Windows in Strip
+
+    func moveWindowLeft() {
+        let ws = activeWorkspace
+        guard ws.focusIndex > 0 else { return }
+        ws.windows.swapAt(ws.focusIndex, ws.focusIndex - 1)
+        ws.focusIndex -= 1
+        ensureWindowVisible(at: ws.focusIndex)
+    }
+
+    func moveWindowRight() {
+        let ws = activeWorkspace
+        guard ws.focusIndex < ws.windows.count - 1 else { return }
+        ws.windows.swapAt(ws.focusIndex, ws.focusIndex + 1)
+        ws.focusIndex += 1
+        ensureWindowVisible(at: ws.focusIndex)
     }
 
     // MARK: - Width Cycling

@@ -13,8 +13,17 @@ final class HotkeyManager {
     private let hyperShiftMask: NSEvent.ModifierFlags = [.control, .option, .command, .shift]
     private let relevantModifiers: NSEvent.ModifierFlags = [.control, .option, .command, .shift]
 
-    // Width presets: 1/4, 1/3, 1/2, 2/3, 3/4, 1
-    static let widthPresets: [CGFloat] = [0.25, 1.0/3.0, 0.50, 2.0/3.0, 0.75, 1.0]
+    /// Screen-adaptive width presets:
+    /// Normal/Wide → 1/2, 1  |  Ultrawide → 1/3, 2/3, 1
+    static var widthPresets: [CGFloat] {
+        guard let screen = NSScreen.main?.visibleFrame else { return [0.5, 1.0] }
+        let aspect = screen.width / screen.height
+        if aspect >= 2.3 {
+            return [1.0/3.0, 2.0/3.0, 1.0]  // ultrawide
+        } else {
+            return [0.5, 1.0]                 // normal + wide
+        }
+    }
 
     init(workspaceManager: WorkspaceManager, stripLayout: StripLayout) {
         self.workspaceManager = workspaceManager
@@ -77,15 +86,53 @@ final class HotkeyManager {
             return
         }
 
-        // Hyper+H / Hyper+Left: Focus left
-        if isHyper && (keyCode == 4 || keyCode == 123) { // H or LeftArrow
+        // Hyper+H / Hyper+Left / Hyper+ß(DE)/--(US): Focus left
+        // keyCode 27 = ß on DE / - on US (key after 0)
+        if isHyper && (keyCode == 4 || keyCode == 123 || keyCode == 27) {
             workspaceManager?.focusLeft()
             return
         }
 
-        // Hyper+L / Hyper+Right: Focus right
-        if isHyper && (keyCode == 37 || keyCode == 124) { // L or RightArrow
+        // Hyper+L / Hyper+Right / Hyper+´(DE)/=(US): Focus right
+        // keyCode 24 = ´ on DE / = on US (key after ß/-)
+        if isHyper && (keyCode == 37 || keyCode == 124 || keyCode == 24) {
             workspaceManager?.focusRight()
+            return
+        }
+
+        // Hyper+Shift+ß/- : Move window left in strip
+        if isHyperShift && keyCode == 27 {
+            workspaceManager?.moveWindowLeft()
+            return
+        }
+
+        // Hyper+Shift+´/= : Move window right in strip
+        if isHyperShift && keyCode == 24 {
+            workspaceManager?.moveWindowRight()
+            return
+        }
+
+        // Hyper+Pad+ / Hyper++ (DE keyCode 30): Width up
+        if isHyper && (keyCode == 69 || keyCode == 30) {
+            workspaceManager?.widthStep(up: true)
+            return
+        }
+
+        // Hyper+Pad- / Hyper+- (keyCode 27 with shift to disambiguate — use Shift variants)
+        if isHyper && keyCode == 78 { // Keypad -
+            workspaceManager?.widthStep(up: false)
+            return
+        }
+
+        // Hyper+Shift+Pad+: Width up
+        if isHyperShift && (keyCode == 69 || keyCode == 30) {
+            workspaceManager?.widthStep(up: true)
+            return
+        }
+
+        // Hyper+Shift+Pad-: Width down
+        if isHyperShift && keyCode == 78 {
+            workspaceManager?.widthStep(up: false)
             return
         }
 
