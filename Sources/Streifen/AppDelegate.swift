@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var workspaceManager: WorkspaceManager?
     private var hotkeyManager: HotkeyManager?
     private var stripLayout: StripLayout?
+    private var debugServer: DebugServer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         killOtherInstances()
@@ -42,10 +43,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotkeyManager?.registerHotkeys()
 
+        debugServer = DebugServer(workspaceManager: workspaceManager!)
+        debugServer?.start()
+
         slog("Started — tracking windows")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        debugServer?.stop()
         // Crash safety: move all windows back on-screen
         workspaceManager?.restoreAllWindowsOnScreen()
         slog("Shutdown — windows restored")

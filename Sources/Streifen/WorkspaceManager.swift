@@ -15,6 +15,9 @@ final class Workspace {
     var isVisible: Bool = false
 }
 
+/// Park position for hidden windows — far enough that no screen can show them
+let offscreenPark = CGPoint(x: 99999, y: 99999)
+
 @MainActor
 final class WorkspaceManager {
     private(set) var workspaces: [Int: Workspace] = [:]
@@ -39,6 +42,18 @@ final class WorkspaceManager {
             self, selector: #selector(handleResetNotification),
             name: .resetAllWorkspaces, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleScreenChange),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil
+        )
+    }
+
+    @objc private func handleScreenChange(_ notification: Notification) {
+        Task { @MainActor in
+            slog("Screen parameters changed — relayouting")
+            clampScrollOffset(activeWorkspace)
+            layoutActiveWorkspace()
+        }
     }
 
     func setWindowTracker(_ tracker: WindowTracker) {
@@ -58,8 +73,6 @@ final class WorkspaceManager {
     /// Sort all windows into workspaces at startup based on pinned config
     func initialSort(_ windows: [TrackedWindow]) {
         windowTracker?.beginProgrammaticUpdate()
-        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
-        let offscreen = CGPoint(x: screen.maxX + screen.width, y: screen.maxY + screen.height)
 
         // Track which pinned bundle IDs already have their first window placed
         var pinnedPlaced: Set<String> = []
@@ -80,7 +93,7 @@ final class WorkspaceManager {
             targetWs.windows.append(window)
 
             if targetWs !== activeWorkspace {
-                window.setPosition(offscreen)
+                window.setPosition(offscreenPark)
             }
         }
 
@@ -128,11 +141,9 @@ final class WorkspaceManager {
                     ws.focusIndex = insertIdx
                 }
 
-                // If target is not the active workspace, move off-screen
+                // If target is not the active workspace, hide
                 if targetWs !== ws {
-                    let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
-                    let offscreen = CGPoint(x: screen.maxX + screen.width, y: screen.maxY + screen.height)
-                    window.setPosition(offscreen)
+                    window.setPosition(offscreenPark)
                 }
 
                 added = true
@@ -153,20 +164,12 @@ final class WorkspaceManager {
             ws.focusIndex = max(0, ws.windows.count - 1)
         }
 
-        // Sync widthRatio from actual window size (manual resize)
-        var resized = false
-        if !added && !removed, let screen = NSScreen.main?.visibleFrame {
-            for window in ws.windows {
-                let actualRatio = (window.frame.width + 2 * config.gap) / screen.width
-                if abs(actualRatio - window.widthRatio) > 0.02 {
-                    window.widthRatio = actualRatio
-                    resized = true
-                }
-            }
-        }
-
         // Re-layout strip
-        if added || removed || resized {
+        if added || removed {
+            if removed {
+                // After removing a window, clamp scroll offset so no gap appears at the end
+                clampScrollOffset(ws)
+            }
             if added {
                 ensureWindowVisible(at: ws.focusIndex)
             } else {
@@ -185,27 +188,34 @@ final class WorkspaceManager {
 
         windowTracker?.beginProgrammaticUpdate()
 
-        // Hide current workspace windows (off-screen)
-        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
-        let offscreen = CGPoint(x: screen.maxX + screen.width, y: screen.maxY + screen.height)
-
+        // Hide current workspace windows off-screen
         for window in activeWorkspace.windows {
-            window.setPosition(offscreen)
+            window.setPosition(offscreenPark)
         }
         activeWorkspace.isVisible = false
 
         // Show target workspace
         activeWorkspaceId = targetId
         activeWorkspace.isVisible = true
-
-        // Layout and position target workspace windows
-        layoutActiveWorkspace()
+        ensureWindowVisible(at: activeWorkspace.focusIndex)
 
         windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
 
         saveState()
         slog("Switched to workspace \(targetId)")
+    }
+
+    func switchPrevious() {
+        let target = activeWorkspaceId - 1
+        guard target >= 1 else { return }
+        switchTo(workspace: target)
+    }
+
+    func switchNext() {
+        let target = activeWorkspaceId + 1
+        guard target <= 9 else { return }
+        switchTo(workspace: target)
     }
 
     // MARK: - Move Window to Workspace
@@ -225,10 +235,8 @@ final class WorkspaceManager {
 
         // If target is not visible, move off-screen
         if !targetWs.isVisible {
-            let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
-            let offscreen = CGPoint(x: screen.maxX + screen.width, y: screen.maxY + screen.height)
             windowTracker?.beginProgrammaticUpdate()
-            window.setPosition(offscreen)
+            window.setPosition(offscreenPark)
             windowTracker?.endProgrammaticUpdate()
         }
 
@@ -281,29 +289,38 @@ final class WorkspaceManager {
 
         // Calculate where window sits in the strip (sum of previous widths)
         let gap = config.gap
+        let peek = config.peekWidth
+        let hasNeighbors = ws.windows.count > 1
+        let maxW = screen.width - (2 * gap) - (2 * peek)
+
         var windowX: CGFloat = gap
         for i in 0..<index {
-            let w = screen.width * ws.windows[i].widthRatio - (2 * gap)
+            var w = screen.width * ws.windows[i].widthRatio - (2 * gap)
+            if hasNeighbors { w = min(w, maxW) }
             windowX += max(w, 200) + gap
         }
-        let windowWidth = max(screen.width * ws.windows[index].widthRatio - (2 * gap), 200)
+        var windowWidth = screen.width * ws.windows[index].widthRatio - (2 * gap)
+        if hasNeighbors { windowWidth = min(windowWidth, maxW) }
+        windowWidth = max(windowWidth, 200)
 
-        // Scroll-into-view: only scroll if focused window isn't fully visible
-        // Tolerance of 5px to avoid scrolling on rounding errors
+        // Peek margins: reserve space for neighbor peek
+        let leftPeek: CGFloat = index > 0 ? peek : 0
+        let rightPeek: CGFloat = index < ws.windows.count - 1 ? peek : 0
+
         let tolerance: CGFloat = 5
         let currentLeft = windowX + ws.scrollOffset
         let currentRight = currentLeft + windowWidth
-        let screenLeft = gap
-        let screenRight = screen.width - gap
+        let screenLeft = gap + leftPeek
+        let screenRight = screen.width - gap - rightPeek
 
-        if currentLeft < screenLeft - tolerance {
-            // Window is off-screen left — scroll right to show its left edge
+        if windowWidth > screenRight - screenLeft {
+            // Window wider than available space — align left edge
+            ws.scrollOffset = screenLeft - windowX
+        } else if currentLeft < screenLeft - tolerance {
             ws.scrollOffset += screenLeft - currentLeft
         } else if currentRight > screenRight + tolerance {
-            // Window is off-screen right — scroll left to show its right edge
             ws.scrollOffset -= currentRight - screenRight
         }
-        // else: already fully visible, don't scroll
 
         layoutActiveWorkspace()
     }
@@ -311,20 +328,63 @@ final class WorkspaceManager {
     // MARK: - App Focus (Cmd+Tab etc.)
 
     func handleAppActivated(_ app: NSRunningApplication) {
-        // App-level activation — try to find focused window via AX
         let pid = app.processIdentifier
-        guard let appElement = AXSwift.Application(forProcessID: pid),
-              let focusedWindow: UIElement = try? appElement.attribute(.focusedWindow),
-              let wid = getWindowId(from: focusedWindow) else {
-            // Fallback: find first window of this app in active workspace
-            let ws = activeWorkspace
-            if let idx = ws.windows.firstIndex(where: { $0.app.processIdentifier == pid }) {
+        let ws = activeWorkspace
+
+        // If this app has a window on the active workspace, prefer staying here.
+        // AX's focusedWindow might report a window from another workspace (stale focus).
+        let localWindow = ws.windows.first(where: { $0.app.processIdentifier == pid })
+
+        // Try to find focused window via AX
+        if let appElement = AXSwift.Application(forProcessID: pid),
+           let focusedWindow: UIElement = try? appElement.attribute(.focusedWindow),
+           let wid = getWindowId(from: focusedWindow) {
+
+            // If the focused window is on the active workspace, use it directly
+            if let idx = ws.windows.firstIndex(where: { $0.windowId == wid }) {
                 ws.focusIndex = idx
                 ensureWindowVisible(at: idx)
+                return
             }
+
+            // Focused window is on another workspace — but if we have a local
+            // window of the same app, stay here (user likely clicked it)
+            if let local = localWindow,
+               let idx = ws.windows.firstIndex(where: { $0.windowId == local.windowId }) {
+                ws.focusIndex = idx
+                ensureWindowVisible(at: idx)
+                return
+            }
+
+            // No local window — switch to the workspace with the focused window
+            handleWindowFocused(windowId: wid)
             return
         }
-        handleWindowFocused(windowId: wid)
+
+        // Fallback: AX returned no focused window
+        if let local = localWindow,
+           let idx = ws.windows.firstIndex(where: { $0.windowId == local.windowId }) {
+            ws.focusIndex = idx
+            ensureWindowVisible(at: idx)
+            return
+        }
+
+        // Search other workspaces — switch to the one containing this app's window
+        for (wsId, otherWs) in workspaces where wsId != activeWorkspaceId {
+            if let window = otherWs.windows.first(where: { $0.app.processIdentifier == pid }) {
+                switchTo(workspace: wsId)
+                if let idx = activeWorkspace.windows.firstIndex(where: { $0.windowId == window.windowId }) {
+                    activeWorkspace.focusIndex = idx
+                    do {
+                        try window.axElement.setAttribute(.main, value: true)
+                        window.app.activate()
+                    } catch {}
+                    ensureWindowVisible(at: idx)
+                }
+                slog("Auto-switched to workspace \(wsId) (app activated, fallback)")
+                return
+            }
+        }
     }
 
     func handleWindowFocused(windowId: CGWindowID) {
@@ -398,6 +458,25 @@ final class WorkspaceManager {
 
     // MARK: - Width Cycling
 
+    func setWidthRatio(_ ratio: CGFloat) {
+        let ws = activeWorkspace
+        guard ws.focusIndex < ws.windows.count else { return }
+        ws.windows[ws.focusIndex].widthRatio = ratio
+        slog("Width → \(ratio) (\(Int(ratio * 100))%)")
+        ensureWindowVisible(at: ws.focusIndex)
+    }
+
+    func resetAllWidths() {
+        let ws = activeWorkspace
+        let defaultRatio = TrackedWindow.defaultWidthRatio()
+        for window in ws.windows {
+            window.widthRatio = defaultRatio
+        }
+        ws.scrollOffset = 0
+        slog("Reset all widths to \(Int(defaultRatio * 100))% (\(ws.windows.count) windows)")
+        ensureWindowVisible(at: ws.focusIndex)
+    }
+
     func cycleWidth(reverse: Bool = false) {
         let ws = activeWorkspace
         guard ws.focusIndex < ws.windows.count else { return }
@@ -464,6 +543,22 @@ final class WorkspaceManager {
 
     func layoutCurrentWorkspace() {
         layoutActiveWorkspace()
+    }
+
+    /// Ensure scroll offset doesn't leave empty space at the strip's end
+    private func clampScrollOffset(_ ws: Workspace) {
+        guard let screen = NSScreen.main?.visibleFrame, let strip = stripLayout else { return }
+        let totalWidth = strip.totalWidth(workspace: ws, screenFrame: screen)
+        let screenWidth = screen.width
+
+        // Don't scroll past the right end of the strip
+        if totalWidth + ws.scrollOffset < screenWidth {
+            ws.scrollOffset = screenWidth - totalWidth
+        }
+        // Don't scroll past the left end
+        if ws.scrollOffset > 0 {
+            ws.scrollOffset = 0
+        }
     }
 
     private func layoutActiveWorkspace() {
@@ -570,8 +665,6 @@ final class WorkspaceManager {
         let allWindows = currentWindows
         for ws in workspaces.values { ws.windows.removeAll() }
 
-        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
-        let offscreen = CGPoint(x: screen.maxX + screen.width, y: screen.maxY + screen.height)
         var restored = 0
 
         for window in allWindows {
@@ -582,7 +675,7 @@ final class WorkspaceManager {
                 window.widthRatio = ratio
                 workspaces[wsId]?.windows.append(window)
                 if wsId != savedActiveWs {
-                    window.setPosition(offscreen)
+                    window.setPosition(offscreenPark)
                 }
                 restored += 1
             } else {

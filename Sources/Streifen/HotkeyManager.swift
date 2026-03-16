@@ -32,12 +32,12 @@ final class HotkeyManager {
 
     func registerHotkeys() {
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.handleKeyEvent(event)
             }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.handleKeyEvent(event)
             }
             return event
@@ -100,14 +100,14 @@ final class HotkeyManager {
             return
         }
 
-        // Hyper+Shift+ß/- : Move window left in strip
-        if isHyperShift && keyCode == 27 {
+        // Hyper+Shift+Left / Hyper+Shift+ß/- : Move window left in strip
+        if isHyperShift && (keyCode == 123 || keyCode == 27) {
             workspaceManager?.moveWindowLeft()
             return
         }
 
-        // Hyper+Shift+´/= : Move window right in strip
-        if isHyperShift && keyCode == 24 {
+        // Hyper+Shift+Right / Hyper+Shift+´/= : Move window right in strip
+        if isHyperShift && (keyCode == 124 || keyCode == 24) {
             workspaceManager?.moveWindowRight()
             return
         }
@@ -136,15 +136,42 @@ final class HotkeyManager {
             return
         }
 
-        // Hyper+Up: Width up (next bigger preset)
+
+        // Hyper+Up: Switch to next (higher number) workspace
         if isHyper && keyCode == 126 { // UpArrow
-            workspaceManager?.widthStep(up: true)
+            workspaceManager?.switchNext()
             return
         }
 
-        // Hyper+Down: Width down (next smaller preset)
+        // Hyper+Down: Switch to previous (lower number) workspace
         if isHyper && keyCode == 125 { // DownArrow
-            workspaceManager?.widthStep(up: false)
+            workspaceManager?.switchPrevious()
+            return
+        }
+
+        // Hyper+Shift+Up: Move window to next (higher number) workspace
+        if isHyperShift && keyCode == 126 {
+            guard let mgr = workspaceManager else { return }
+            let active = mgr.activeWorkspace
+            guard active.focusIndex < active.windows.count else { return }
+            let window = active.windows[active.focusIndex]
+            let targetWs = mgr.activeWorkspaceId + 1
+            guard targetWs <= 9 else { return }
+            slog("Moving window \(window.windowId) → ws\(targetWs)")
+            mgr.moveWindow(window, toWorkspace: targetWs)
+            return
+        }
+
+        // Hyper+Shift+Down: Move window to previous (lower number) workspace
+        if isHyperShift && keyCode == 125 {
+            guard let mgr = workspaceManager else { return }
+            let active = mgr.activeWorkspace
+            guard active.focusIndex < active.windows.count else { return }
+            let window = active.windows[active.focusIndex]
+            let targetWs = mgr.activeWorkspaceId - 1
+            guard targetWs >= 1 else { return }
+            slog("Moving window \(window.windowId) → ws\(targetWs)")
+            mgr.moveWindow(window, toWorkspace: targetWs)
             return
         }
 
@@ -163,6 +190,33 @@ final class HotkeyManager {
         // Hyper+PadEnter: Toggle full width
         if isHyper && keyCode == 76 { // KeypadEnter
             workspaceManager?.toggleFullWidth()
+            return
+        }
+
+        // Hyper+F1: Full width (1.0)
+        if isHyper && keyCode == 122 {
+            workspaceManager?.setWidthRatio(1.0)
+            return
+        }
+        // Hyper+F2: Half width (0.5)
+        if isHyper && keyCode == 120 {
+            workspaceManager?.setWidthRatio(0.5)
+            return
+        }
+        // Hyper+F3: Third width (1/3)
+        if isHyper && keyCode == 99 {
+            workspaceManager?.setWidthRatio(1.0 / 3.0)
+            return
+        }
+        // Hyper+F4: Quarter width (0.25)
+        if isHyper && keyCode == 118 {
+            workspaceManager?.setWidthRatio(0.25)
+            return
+        }
+
+        // Hyper+Shift+F1: Reset all windows in workspace to default width
+        if isHyperShift && keyCode == 122 { // F1
+            workspaceManager?.resetAllWidths()
             return
         }
 
