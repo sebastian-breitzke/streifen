@@ -27,7 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         windowTracker?.onWindowFocused = { [weak self] windowId in
-            self?.workspaceManager?.handleWindowFocused(windowId: windowId)
+            // AX focusedWindowChanged: only update focus within active workspace.
+            // Never switch workspaces — that's handleAppActivated's job.
+            self?.workspaceManager?.handleWindowFocused(windowId: windowId, allowWorkspaceSwitch: false)
         }
 
         // Discover windows — try to restore saved state, fallback to initial sort

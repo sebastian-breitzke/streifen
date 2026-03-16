@@ -387,7 +387,7 @@ final class WorkspaceManager {
         }
     }
 
-    func handleWindowFocused(windowId: CGWindowID) {
+    func handleWindowFocused(windowId: CGWindowID, allowWorkspaceSwitch: Bool = true) {
         let ws = activeWorkspace
 
         // Already in active workspace? Just update focus index.
@@ -396,6 +396,11 @@ final class WorkspaceManager {
             ensureWindowVisible(at: idx)
             return
         }
+
+        // Don't switch workspaces unless explicitly allowed (Cmd+Tab, Dock click).
+        // AX focusedWindowChanged is too noisy — browser popups, autocomplete
+        // dropdowns, and internal window management cause false switches.
+        guard allowWorkspaceSwitch else { return }
 
         // Find which workspace has this window
         guard let (sourceWsId, sourceWs, window) = findWindow(byId: windowId) else { return }
@@ -413,13 +418,6 @@ final class WorkspaceManager {
 
         // Window is on another workspace → switch to that workspace
         if sourceWsId != activeWorkspaceId {
-            // If the same app already has a window on the active workspace,
-            // don't switch — this is a transient focus shift from a popup,
-            // autocomplete dropdown, or internal window management.
-            if ws.windows.contains(where: { $0.app.processIdentifier == window.app.processIdentifier }) {
-                return
-            }
-
             switchTo(workspace: sourceWsId)
             // Update focus index in the target workspace
             if let idx = activeWorkspace.windows.firstIndex(where: { $0.windowId == windowId }) {
