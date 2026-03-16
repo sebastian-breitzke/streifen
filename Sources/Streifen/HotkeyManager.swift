@@ -13,18 +13,6 @@ final class HotkeyManager {
     private let hyperShiftMask: NSEvent.ModifierFlags = [.control, .option, .command, .shift]
     private let relevantModifiers: NSEvent.ModifierFlags = [.control, .option, .command, .shift]
 
-    /// Screen-adaptive width presets:
-    /// Normal/Wide → 1/2, 1  |  Ultrawide → 1/3, 2/3, 1
-    static var widthPresets: [CGFloat] {
-        guard let screen = NSScreen.main?.visibleFrame else { return [0.5, 1.0] }
-        let aspect = screen.width / screen.height
-        if aspect >= 2.3 {
-            return [1.0/3.0, 2.0/3.0, 1.0]  // ultrawide
-        } else {
-            return [0.5, 1.0]                 // normal + wide
-        }
-    }
-
     init(workspaceManager: WorkspaceManager, stripLayout: StripLayout) {
         self.workspaceManager = workspaceManager
         self.stripLayout = stripLayout
@@ -112,31 +100,6 @@ final class HotkeyManager {
             return
         }
 
-        // Hyper+Pad+ / Hyper++ (DE keyCode 30): Width up
-        if isHyper && (keyCode == 69 || keyCode == 30) {
-            workspaceManager?.widthStep(up: true)
-            return
-        }
-
-        // Hyper+Pad- / Hyper+- (keyCode 27 with shift to disambiguate — use Shift variants)
-        if isHyper && keyCode == 78 { // Keypad -
-            workspaceManager?.widthStep(up: false)
-            return
-        }
-
-        // Hyper+Shift+Pad+: Width up
-        if isHyperShift && (keyCode == 69 || keyCode == 30) {
-            workspaceManager?.widthStep(up: true)
-            return
-        }
-
-        // Hyper+Shift+Pad-: Width down
-        if isHyperShift && keyCode == 78 {
-            workspaceManager?.widthStep(up: false)
-            return
-        }
-
-
         // Hyper+Up: Switch to next (higher number) workspace
         if isHyper && keyCode == 126 { // UpArrow
             workspaceManager?.switchNext()
@@ -175,47 +138,29 @@ final class HotkeyManager {
             return
         }
 
-        // Hyper+Pad0: Cycle width forward
-        if isHyper && keyCode == 82 { // Keypad0
-            workspaceManager?.cycleWidth()
-            return
+
+        // Hyper+F1-F5: Set T-Shirt size (screen-adaptive)
+        let fKeySizes: [(UInt16, AppSize)] = [
+            (122, .full),  // F1
+            (120, .xl),    // F2
+            (99,  .l),     // F3
+            (118, .m),     // F4
+            (96,  .s),     // F5
+        ]
+
+        for (fKey, size) in fKeySizes {
+            if isHyper && keyCode == fKey {
+                workspaceManager?.setSize(size)
+                return
+            }
+            if isHyperShift && keyCode == fKey {
+                workspaceManager?.setAppDefaultSize(size)
+                return
+            }
         }
 
-        // Hyper+Shift+Pad0: Cycle width backward
-        if isHyperShift && keyCode == 82 {
-            workspaceManager?.cycleWidth(reverse: true)
-            return
-        }
-
-        // Hyper+PadEnter: Toggle full width
-        if isHyper && keyCode == 76 { // KeypadEnter
-            workspaceManager?.toggleFullWidth()
-            return
-        }
-
-        // Hyper+F1: Full width (1.0)
-        if isHyper && keyCode == 122 {
-            workspaceManager?.setWidthRatio(1.0)
-            return
-        }
-        // Hyper+F2: Half width (0.5)
-        if isHyper && keyCode == 120 {
-            workspaceManager?.setWidthRatio(0.5)
-            return
-        }
-        // Hyper+F3: Third width (1/3)
-        if isHyper && keyCode == 99 {
-            workspaceManager?.setWidthRatio(1.0 / 3.0)
-            return
-        }
-        // Hyper+F4: Quarter width (0.25)
-        if isHyper && keyCode == 118 {
-            workspaceManager?.setWidthRatio(0.25)
-            return
-        }
-
-        // Hyper+Shift+F1: Reset all windows in workspace to default width
-        if isHyperShift && keyCode == 122 { // F1
+        // Hyper+Shift+Escape: Reset all windows in workspace to app defaults
+        if isHyperShift && keyCode == 53 { // Escape
             workspaceManager?.resetAllWidths()
             return
         }
@@ -296,19 +241,4 @@ final class HotkeyManager {
         slog("  --- END DUMP ---")
     }
 
-    // MARK: - Width Preset Logic
-
-    /// Find nearest preset index for a given width ratio
-    static func nearestPresetIndex(for ratio: CGFloat) -> Int {
-        var bestIdx = 0
-        var bestDist = CGFloat.greatestFiniteMagnitude
-        for (i, preset) in widthPresets.enumerated() {
-            let dist = abs(ratio - preset)
-            if dist < bestDist {
-                bestDist = dist
-                bestIdx = i
-            }
-        }
-        return bestIdx
-    }
 }

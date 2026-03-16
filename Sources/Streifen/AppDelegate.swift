@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard checkAccessibility() else { return }
 
         let config = StreifenConfig.default
-        windowTracker = WindowTracker()
+        windowTracker = WindowTracker(config: config)
         workspaceManager = WorkspaceManager(config: config)
         stripLayout = StripLayout(config: config)
         hotkeyManager = HotkeyManager(workspaceManager: workspaceManager!, stripLayout: stripLayout!)

@@ -8,19 +8,19 @@ final class TrackedWindow: @unchecked Sendable {
     var frame: CGRect
     var virtualX: CGFloat
     var widthRatio: CGFloat
+    var appSize: AppSize
     var category: String?
     var resizable: Bool = true
 
-    init(windowId: CGWindowID, axElement: UIElement, app: NSRunningApplication, frame: CGRect) {
+    init(windowId: CGWindowID, axElement: UIElement, app: NSRunningApplication, frame: CGRect, appSize: AppSize) {
         self.windowId = windowId
         self.axElement = axElement
         self.app = app
         self.frame = frame
         self.virtualX = frame.origin.x
-        // Default width ratio based on screen aspect ratio
-        self.widthRatio = TrackedWindow.defaultWidthRatio()
+        self.appSize = appSize
+        self.widthRatio = appSize.ratio(for: ScreenClass.current)
         self.category = nil
-        // Check if window is resizable
         self.resizable = (try? axElement.attributeIsSettable(.size)) ?? false
     }
 
@@ -57,17 +57,9 @@ final class TrackedWindow: @unchecked Sendable {
         setSize(rect.size)
     }
 
-    /// Default width ratio based on screen aspect ratio:
-    /// Ultrawide (≥2.3:1) → 1/3, Wide (≥1.5:1) → 1/2, Normal → 1/1
-    static func defaultWidthRatio() -> CGFloat {
-        guard let screen = NSScreen.main?.visibleFrame else { return 0.5 }
-        let aspect = screen.width / screen.height
-        if aspect >= 2.3 {
-            return 1.0 / 3.0  // ultrawide
-        } else if aspect >= 1.5 {
-            return 0.5         // wide (16:10, 16:9)
-        } else {
-            return 1.0         // normal / portrait
-        }
+    /// Update size and recalculate ratio for current screen
+    func applySize(_ size: AppSize) {
+        appSize = size
+        widthRatio = size.ratio(for: ScreenClass.current)
     }
 }

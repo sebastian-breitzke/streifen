@@ -6,10 +6,15 @@ final class WindowTracker {
     var onWindowsChanged: (([TrackedWindow]) -> Void)?
     var onAppActivated: ((NSRunningApplication) -> Void)?
     var onWindowFocused: ((CGWindowID) -> Void)?
+    var config: StreifenConfig
 
     private var trackedWindows: [CGWindowID: TrackedWindow] = [:]
     private var observers: [pid_t: Observer] = [:]
     private var isUpdating = false
+
+    init(config: StreifenConfig) {
+        self.config = config
+    }
 
     func startTracking() {
         discoverAllWindows()
@@ -97,11 +102,13 @@ final class WindowTracker {
 
             guard windowId != 0, trackedWindows[windowId] == nil else { continue }
 
+            let appSize = config.sizeFor(bundleId: app.bundleIdentifier)
             let tracked = TrackedWindow(
                 windowId: windowId,
                 axElement: axWindow,
                 app: app,
-                frame: frame
+                frame: frame,
+                appSize: appSize
             )
             trackedWindows[windowId] = tracked
         }
@@ -169,8 +176,9 @@ final class WindowTracker {
                 if changed { self.notifyChanged() }
             }
         case .focusedWindowChanged:
-            // element is the newly focused window — find its ID
-            if let wid = getWindowId(from: element) {
+            // Only act on windows we're tracking — ignore popups, dropdowns, etc.
+            if let wid = getWindowId(from: element),
+               trackedWindows[wid] != nil {
                 onWindowFocused?(wid)
             }
         case .moved, .resized:

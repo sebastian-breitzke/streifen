@@ -413,6 +413,13 @@ final class WorkspaceManager {
 
         // Window is on another workspace → switch to that workspace
         if sourceWsId != activeWorkspaceId {
+            // If the same app already has a window on the active workspace,
+            // don't switch — this is a transient focus shift from a popup,
+            // autocomplete dropdown, or internal window management.
+            if ws.windows.contains(where: { $0.app.processIdentifier == window.app.processIdentifier }) {
+                return
+            }
+
             switchTo(workspace: sourceWsId)
             // Update focus index in the target workspace
             if let idx = activeWorkspace.windows.firstIndex(where: { $0.windowId == windowId }) {
@@ -456,7 +463,41 @@ final class WorkspaceManager {
         ensureWindowVisible(at: ws.focusIndex)
     }
 
-    // MARK: - Width Cycling
+    // MARK: - T-Shirt Sizing
+
+    /// Set focused window to a T-Shirt size (resolves to ratio based on screen class)
+    func setSize(_ size: AppSize) {
+        let ws = activeWorkspace
+        guard ws.focusIndex < ws.windows.count else { return }
+        let window = ws.windows[ws.focusIndex]
+        window.applySize(size)
+        let sc = ScreenClass.current
+        slog("Size → \(size.rawValue) (\(Int(window.widthRatio * 100))% on \(sc.rawValue))")
+        ensureWindowVisible(at: ws.focusIndex)
+    }
+
+    /// Set the app-default size for the focused window's app. Updates all windows of that app across all workspaces.
+    func setAppDefaultSize(_ size: AppSize) {
+        let ws = activeWorkspace
+        guard ws.focusIndex < ws.windows.count else { return }
+        let window = ws.windows[ws.focusIndex]
+        guard let bundleId = window.bundleId else { return }
+
+        // Persist in config
+        config.appSizes[bundleId] = size
+
+        // Update all windows of this app across all workspaces
+        var count = 0
+        for workspace in workspaces.values {
+            for w in workspace.windows where w.bundleId == bundleId {
+                w.applySize(size)
+                count += 1
+            }
+        }
+
+        slog("App default → \(bundleId): \(size.rawValue) (\(count) windows updated)")
+        ensureWindowVisible(at: ws.focusIndex)
+    }
 
     func setWidthRatio(_ ratio: CGFloat) {
         let ws = activeWorkspace
@@ -466,78 +507,18 @@ final class WorkspaceManager {
         ensureWindowVisible(at: ws.focusIndex)
     }
 
+    /// Reset all windows in active workspace to their app-default sizes
     func resetAllWidths() {
         let ws = activeWorkspace
-        let defaultRatio = TrackedWindow.defaultWidthRatio()
         for window in ws.windows {
-            window.widthRatio = defaultRatio
+            let size = config.sizeFor(bundleId: window.bundleId)
+            window.applySize(size)
         }
         ws.scrollOffset = 0
-        slog("Reset all widths to \(Int(defaultRatio * 100))% (\(ws.windows.count) windows)")
+        slog("Reset all widths to app defaults (\(ws.windows.count) windows)")
         ensureWindowVisible(at: ws.focusIndex)
     }
 
-    func cycleWidth(reverse: Bool = false) {
-        let ws = activeWorkspace
-        guard ws.focusIndex < ws.windows.count else { return }
-        let window = ws.windows[ws.focusIndex]
-
-        let widths = config.cycleWidths
-        guard !widths.isEmpty else { return }
-
-        if let currentIdx = widths.firstIndex(where: { abs($0 - window.widthRatio) < 0.01 }) {
-            let nextIdx = reverse
-                ? (currentIdx - 1 + widths.count) % widths.count
-                : (currentIdx + 1) % widths.count
-            window.widthRatio = widths[nextIdx]
-        } else {
-            window.widthRatio = widths[0]
-        }
-
-        layoutActiveWorkspace()
-    }
-
-    func toggleFullWidth() {
-        let ws = activeWorkspace
-        guard ws.focusIndex < ws.windows.count else { return }
-        let window = ws.windows[ws.focusIndex]
-
-        if abs(window.widthRatio - 1.0) < 0.01 {
-            window.widthRatio = config.cycleWidths.first ?? 0.50
-        } else {
-            window.widthRatio = 1.0
-        }
-
-        layoutActiveWorkspace()
-    }
-
-    /// Step width up/down through presets with snap-to-nearest
-    /// Presets: 1/4, 1/3, 1/2, 2/3, 3/4, 1
-    func widthStep(up: Bool) {
-        let ws = activeWorkspace
-        guard ws.focusIndex < ws.windows.count else { return }
-        let window = ws.windows[ws.focusIndex]
-
-        let presets = HotkeyManager.widthPresets
-        let nearest = HotkeyManager.nearestPresetIndex(for: window.widthRatio)
-
-        let nextIdx: Int
-        if up {
-            nextIdx = min(nearest + 1, presets.count - 1)
-        } else {
-            nextIdx = max(nearest - 1, 0)
-        }
-
-        // Only step if we're actually moving (handle case where nearest == current)
-        if abs(window.widthRatio - presets[nearest]) > 0.02 {
-            // Not on a preset — snap to nearest first
-            window.widthRatio = presets[up ? min(nearest + 1, presets.count - 1) : nearest]
-        } else {
-            window.widthRatio = presets[nextIdx]
-        }
-
-        layoutActiveWorkspace()
-    }
 
     // MARK: - Layout
 
@@ -612,6 +593,7 @@ final class WorkspaceManager {
                     "windowId": Int(window.windowId),
                     "workspace": wsId,
                     "widthRatio": Double(window.widthRatio),
+                    "appSize": window.appSize.rawValue,
                     "bundleId": window.bundleId ?? "",
                     "title": window.title,
                 ])
@@ -673,6 +655,8 @@ final class WorkspaceManager {
 
             if let (wsId, ratio) = match {
                 window.widthRatio = ratio
+                // Restore appSize from config (ratio was persisted as override)
+                window.appSize = config.sizeFor(bundleId: window.bundleId)
                 workspaces[wsId]?.windows.append(window)
                 if wsId != savedActiveWs {
                     window.setPosition(offscreenPark)

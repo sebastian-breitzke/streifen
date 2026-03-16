@@ -184,6 +184,7 @@ final class DebugServer {
             "app": w.app.localizedName ?? "Unknown",
             "bundleId": w.bundleId ?? "",
             "title": w.title,
+            "appSize": w.appSize.rawValue,
             "widthRatio": round(w.widthRatio * 1000) / 1000,
             "resizable": w.resizable,
             "frame": [
@@ -219,9 +220,11 @@ final class DebugServer {
         return [
             "gap": config.gap,
             "peekWidth": config.peekWidth,
-            "cycleWidths": config.cycleWidths.map { round($0 * 1000) / 1000 },
             "pinnedApps": config.pinnedApps,
             "followApps": Array(config.followApps),
+            "screenClass": ScreenClass.current.rawValue,
+            "defaultSize": config.defaultSize.rawValue,
+            "appSizes": config.appSizes.mapValues { $0.rawValue },
         ]
     }
 
