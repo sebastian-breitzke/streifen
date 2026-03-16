@@ -89,7 +89,8 @@ final class WindowTracker {
             } else {
                 let floatingSubroles: Set<String> = [
                     "AXDialog", "AXSheet", "AXFloatingWindow",
-                    "AXSystemDialog", "AXSystemFloatingWindow"
+                    "AXSystemDialog", "AXSystemFloatingWindow",
+                    "AXUnknown",  // Browser popups, autocomplete dropdowns
                 ]
                 if let sr = subrole, floatingSubroles.contains(sr) { continue }
             }
@@ -101,6 +102,9 @@ final class WindowTracker {
             let windowId = getWindowId(from: axWindow) ?? 0
 
             guard windowId != 0, trackedWindows[windowId] == nil else { continue }
+
+            let title: String? = try? axWindow.attribute(.title)
+            slog("Track window \(windowId): \(app.localizedName ?? "?") — \"\(title ?? "")\" [\(Int(size.width))×\(Int(size.height))] subrole=\(subrole ?? "nil")")
 
             let appSize = config.sizeFor(bundleId: app.bundleIdentifier)
             let tracked = TrackedWindow(
@@ -152,6 +156,9 @@ final class WindowTracker {
         case .uiElementDestroyed:
             // Try to match the destroyed element directly
             if let wid = getWindowId(from: element) {
+                if let removed = trackedWindows[wid] {
+                    slog("Untrack window \(wid): \(removed.app.localizedName ?? "?")")
+                }
                 trackedWindows.removeValue(forKey: wid)
             } else {
                 // Fallback: remove any windows of this app that are no longer readable
