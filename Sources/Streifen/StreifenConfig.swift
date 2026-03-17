@@ -1,5 +1,16 @@
 import Cocoa
 
+// MARK: - Managed Screen
+
+extension NSScreen {
+    /// The screen Streifen manages — the widest connected screen.
+    /// Unlike `.main` (which follows keyboard focus and can flip between
+    /// displays), this is stable regardless of which app is focused.
+    static var managed: NSScreen? {
+        NSScreen.screens.max(by: { $0.visibleFrame.width < $1.visibleFrame.width })
+    }
+}
+
 // MARK: - App Size System
 
 enum AppSize: String, Sendable, Codable, CaseIterable {
@@ -39,7 +50,7 @@ enum ScreenClass: String, Sendable {
     case ultrawide  // ≥ 2.3
 
     static var current: ScreenClass {
-        guard let screen = NSScreen.main?.visibleFrame else { return .desktop }
+        guard let screen = NSScreen.managed?.visibleFrame else { return .desktop }
         let aspect = screen.width / screen.height
         if aspect >= 2.3 {
             return .ultrawide

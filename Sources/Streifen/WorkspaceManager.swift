@@ -53,6 +53,7 @@ final class WorkspaceManager {
             slog("Screen parameters changed — relayouting")
             clampScrollOffset(activeWorkspace)
             layoutActiveWorkspace()
+            activateFocusedWindow()
         }
     }
 
@@ -98,6 +99,7 @@ final class WorkspaceManager {
         }
 
         layoutActiveWorkspace()
+        activateFocusedWindow()
         windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
 
@@ -175,6 +177,7 @@ final class WorkspaceManager {
             } else {
                 layoutActiveWorkspace()
             }
+            activateFocusedWindow()
         }
 
         updateMenuBar()
@@ -199,14 +202,10 @@ final class WorkspaceManager {
         activeWorkspace.isVisible = true
         ensureWindowVisible(at: activeWorkspace.focusIndex)
 
+        activateFocusedWindow()
+
         windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
-
-        // Second layout pass — some apps (Zen/Firefox) ignore AX frame changes
-        // immediately after coming back from offscreen
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            self?.layoutActiveWorkspace()
-        }
 
         saveState()
         slog("Switched to workspace \(targetId)")
@@ -252,6 +251,7 @@ final class WorkspaceManager {
             ws.focusIndex = max(0, ws.windows.count - 1)
         }
         layoutActiveWorkspace()
+        activateFocusedWindow()
         updateMenuBar()
     }
 
@@ -289,7 +289,7 @@ final class WorkspaceManager {
     }
 
     private func ensureWindowVisible(at index: Int) {
-        guard let screen = NSScreen.main?.visibleFrame else { return }
+        guard let screen = NSScreen.managed?.visibleFrame else { return }
         let ws = activeWorkspace
         guard index < ws.windows.count else { return }
 
@@ -532,7 +532,7 @@ final class WorkspaceManager {
 
     /// Ensure scroll offset doesn't leave empty space at the strip's end
     private func clampScrollOffset(_ ws: Workspace) {
-        guard let screen = NSScreen.main?.visibleFrame, let strip = stripLayout else { return }
+        guard let screen = NSScreen.managed?.visibleFrame, let strip = stripLayout else { return }
         let totalWidth = strip.totalWidth(workspace: ws, screenFrame: screen)
         let screenWidth = screen.width
 
@@ -547,13 +547,30 @@ final class WorkspaceManager {
     }
 
     private func layoutActiveWorkspace() {
-        guard let screen = NSScreen.main?.visibleFrame else { return }
+        guard let screen = NSScreen.managed?.visibleFrame else { return }
         windowTracker?.beginProgrammaticUpdate()
         stripLayout?.layout(workspace: activeWorkspace, screenFrame: screen, config: config)
         // Delay re-enabling observer to let AX notifications drain
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.windowTracker?.endProgrammaticUpdate()
         }
+    }
+
+    /// Activate windows on the active workspace so they render at their AX-set positions.
+    /// Apps like Zen/Firefox ignore AX position changes unless their window is raised.
+    private func activateFocusedWindow() {
+        let ws = activeWorkspace
+        guard ws.focusIndex < ws.windows.count else { return }
+
+        // Raise all windows — forces each app to render at AX positions
+        for window in ws.windows {
+            try? window.axElement.performAction(.raise)
+        }
+
+        // Activate the focused window's app last so it ends up in front
+        let focused = ws.windows[ws.focusIndex]
+        try? focused.axElement.setAttribute(.main, value: true)
+        focused.app.activate()
     }
 
     // MARK: - Reset
@@ -575,6 +592,7 @@ final class WorkspaceManager {
         ws1.focusIndex = 0
 
         layoutActiveWorkspace()
+        activateFocusedWindow()
         windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
         slog("Reset — all windows moved to workspace 1")
@@ -683,6 +701,7 @@ final class WorkspaceManager {
         for ws in workspaces.values { ws.isVisible = (ws.id == savedActiveWs) }
 
         layoutActiveWorkspace()
+        activateFocusedWindow()
         updateMenuBar()
         slog("State restored (\(restored)/\(allWindows.count) windows matched, age \(Int(age))s)")
         return true
@@ -692,7 +711,7 @@ final class WorkspaceManager {
 
     func restoreAllWindowsOnScreen() {
         saveState()  // Save before crash recovery
-        guard let screen = NSScreen.main?.visibleFrame else { return }
+        guard let screen = NSScreen.managed?.visibleFrame else { return }
         let startX = screen.origin.x + 20
         let startY = screen.origin.y + 20
 

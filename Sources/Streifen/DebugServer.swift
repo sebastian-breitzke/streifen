@@ -99,7 +99,7 @@ final class DebugServer {
 
     private func fullState() -> [String: Any] {
         guard let mgr = workspaceManager else { return ["error": "no manager"] }
-        let screen = NSScreen.main?.visibleFrame
+        let screen = NSScreen.managed?.visibleFrame
         var workspaces: [[String: Any]] = []
         for id in 1...9 {
             guard let ws = mgr.workspaces[id] else { continue }
@@ -116,7 +116,7 @@ final class DebugServer {
 
     private func activeState() -> [String: Any] {
         guard let mgr = workspaceManager else { return ["error": "no manager"] }
-        let screen = NSScreen.main?.visibleFrame
+        let screen = NSScreen.managed?.visibleFrame
         return [
             "activeWorkspace": mgr.activeWorkspaceId,
             "workspace": serializeWorkspace(mgr.activeWorkspace, screen: screen),
@@ -127,7 +127,7 @@ final class DebugServer {
 
     private func windowList() -> [String: Any] {
         guard let mgr = workspaceManager else { return ["error": "no manager"] }
-        let screen = NSScreen.main?.visibleFrame
+        let screen = NSScreen.managed?.visibleFrame
         var windows: [[String: Any]] = []
         for id in 1...9 {
             guard let ws = mgr.workspaces[id] else { continue }
@@ -151,7 +151,7 @@ final class DebugServer {
               let ws = mgr.workspaces[wsId] else {
             return ["error": "workspace \(wsId) not found"]
         }
-        let screen = NSScreen.main?.visibleFrame
+        let screen = NSScreen.managed?.visibleFrame
         return [
             "workspace": serializeWorkspace(ws, screen: screen),
             "isActive": wsId == mgr.activeWorkspaceId,
@@ -205,7 +205,7 @@ final class DebugServer {
     }
 
     private func serializeScreen() -> [String: Any] {
-        guard let screen = NSScreen.main else {
+        guard let screen = NSScreen.managed else {
             return ["error": "no screen"]
         }
         let full = screen.frame

@@ -16,6 +16,8 @@ final class WindowTracker {
         self.config = config
     }
 
+    private var livenessTimer: Timer?
+
     func startTracking() {
         discoverAllWindows()
 
@@ -29,9 +31,18 @@ final class WindowTracker {
             self, selector: #selector(activeAppChanged(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil
         )
+
+        // Periodic liveness check — catch windows that disappeared without AX notification
+        livenessTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.pruneDeadWindows()
+            }
+        }
     }
 
     func stopTracking() {
+        livenessTimer?.invalidate()
+        livenessTimer = nil
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         observers.removeAll()
         trackedWindows.removeAll()
@@ -233,6 +244,23 @@ final class WindowTracker {
     @objc private func activeAppChanged(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         onAppActivated?(app)
+    }
+
+    // MARK: - Liveness Check
+
+    /// Remove tracked windows whose AX element is no longer readable.
+    /// Catches cases where AX destroy notifications are missed (Teams screen sharing, etc.)
+    private func pruneDeadWindows() {
+        guard !isUpdating else { return }
+        var pruned = false
+        for (id, window) in trackedWindows {
+            if (try? window.axElement.attribute(.position) as CGPoint?) == nil {
+                slog("Prune dead window \(id): \(window.app.localizedName ?? "?")")
+                trackedWindows.removeValue(forKey: id)
+                pruned = true
+            }
+        }
+        if pruned { notifyChanged() }
     }
 
     // MARK: - Helpers
