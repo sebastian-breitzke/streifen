@@ -202,6 +202,12 @@ final class WorkspaceManager {
         windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
 
+        // Second layout pass — some apps (Zen/Firefox) ignore AX frame changes
+        // immediately after coming back from offscreen
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.layoutActiveWorkspace()
+        }
+
         saveState()
         slog("Switched to workspace \(targetId)")
     }

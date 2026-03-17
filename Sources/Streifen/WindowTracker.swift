@@ -87,16 +87,16 @@ final class WindowTracker {
                 let title: String? = try? axWindow.attribute(.title)
                 if title == nil || title!.isEmpty { continue }
             } else {
-                let floatingSubroles: Set<String> = [
-                    "AXDialog", "AXSheet", "AXFloatingWindow",
-                    "AXSystemDialog", "AXSystemFloatingWindow",
-                    "AXUnknown",  // Browser popups, autocomplete dropdowns
-                ]
-                if let sr = subrole, floatingSubroles.contains(sr) { continue }
+                // Only track standard windows — skip popups, dialogs, dropdowns, etc.
+                guard subrole == "AXStandardWindow" else { continue }
             }
 
             // Skip small windows (Calculator, color pickers, etc.)
             guard size.width >= 400 || size.height >= 400 else { continue }
+
+            // Skip non-resizable windows with small height — popups, reminders, notifications
+            let isResizable = (try? axWindow.attributeIsSettable(.size)) ?? false
+            if !isResizable && (size.height < 200 || size.width < 200) { continue }
 
             let frame = CGRect(origin: position, size: size)
             let windowId = getWindowId(from: axWindow) ?? 0
