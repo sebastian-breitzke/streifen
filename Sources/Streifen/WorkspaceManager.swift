@@ -284,9 +284,11 @@ final class WorkspaceManager {
         if ws.focusIndex >= ws.windows.count {
             ws.focusIndex = max(0, ws.windows.count - 1)
         }
+        OverlayPanel.shared.showMovedToWorkspace(targetId)
         layoutActiveWorkspace()
         activateFocusedWindow()
         updateMenuBar()
+        saveState()
     }
 
     // MARK: - Focus Navigation
@@ -511,6 +513,7 @@ final class WorkspaceManager {
         guard ws.focusIndex > 0 else { return }
         ws.windows.swapAt(ws.focusIndex, ws.focusIndex - 1)
         ws.focusIndex -= 1
+        OverlayPanel.shared.showReorder(position: ws.focusIndex + 1, total: ws.windows.count, direction: "◀")
         ensureWindowVisible(at: ws.focusIndex)
     }
 
@@ -519,6 +522,7 @@ final class WorkspaceManager {
         guard ws.focusIndex < ws.windows.count - 1 else { return }
         ws.windows.swapAt(ws.focusIndex, ws.focusIndex + 1)
         ws.focusIndex += 1
+        OverlayPanel.shared.showReorder(position: ws.focusIndex + 1, total: ws.windows.count, direction: "▶")
         ensureWindowVisible(at: ws.focusIndex)
     }
 
