@@ -50,7 +50,16 @@ final class WorkspaceManager {
 
     @objc private func handleScreenChange(_ notification: Notification) {
         Task { @MainActor in
-            slog("Screen parameters changed — relayouting")
+            let sc = ScreenClass.current
+            slog("Screen parameters changed → \(sc.rawValue) — recalculating all sizes")
+
+            // Recalculate all widthRatios for the new screen class
+            for ws in workspaces.values {
+                for window in ws.windows {
+                    window.widthRatio = window.appSize.ratio(for: sc)
+                }
+            }
+
             clampScrollOffset(activeWorkspace)
             layoutActiveWorkspace()
             activateFocusedWindow()
