@@ -125,37 +125,40 @@ final class OverlayPanel {
 // MARK: - SwiftUI View
 
 private struct OverlayView: View {
+    @Environment(\.colorScheme) var colorScheme
     let primary: String
     let secondary: String?
     let accent: Color
     let fontSize: CGFloat
 
+    private var isDark: Bool { colorScheme == .dark }
+
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             Text(primary)
                 .font(.system(size: fontSize, weight: .black, design: .rounded))
-                .foregroundStyle(accent)
+                .foregroundStyle(isDark ? Color.white : accent)
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
 
             if let secondary {
                 Text(secondary)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(isDark ? Color.white.opacity(0.35) : Color(white: 0.5))
                     .textCase(.uppercase)
-                    .tracking(2)
+                    .tracking(3)
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 20)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.black.opacity(0.8))
-                .background(
+                .fill(isDark ? Color(white: 0.1) : Color(red: 0.98, green: 0.97, blue: 0.95))
+                .shadow(color: .black.opacity(isDark ? 0.5 : 0.1), radius: 24, y: 8)
+                .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(.ultraThinMaterial)
+                        .strokeBorder(isDark ? accent.opacity(0.35) : Color(white: 0.88), lineWidth: 1)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         )
     }
 }
