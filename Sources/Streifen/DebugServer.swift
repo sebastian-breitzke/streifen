@@ -187,7 +187,7 @@ final class DebugServer {
             "appSize": w.appSize.rawValue,
             "sliceCount": w.sliceCount,
             "totalSlices": ScreenClass.current.totalSlices,
-            "resizable": w.resizable,
+
             "frame": [
                 "x": round(w.frame.origin.x),
                 "y": round(w.frame.origin.y),
