@@ -241,6 +241,7 @@ final class WorkspaceManager {
         updateMenuBar()
 
         saveState()
+        OverlayPanel.shared.showWorkspace(targetId)
         slog("Switched to workspace \(targetId)")
     }
 
@@ -530,6 +531,7 @@ final class WorkspaceManager {
         let window = ws.windows[ws.focusIndex]
         window.setSliceCount(count)
         let sc = ScreenClass.current
+        OverlayPanel.shared.showSlices(window.sliceCount, total: sc.totalSlices)
         slog("Slices → \(window.sliceCount)/\(sc.totalSlices)")
         ensureWindowVisible(at: ws.focusIndex)
     }
@@ -540,7 +542,9 @@ final class WorkspaceManager {
         guard ws.focusIndex < ws.windows.count else { return }
         let window = ws.windows[ws.focusIndex]
         window.setSliceCount(window.sliceCount + delta)
-        slog("Slices → \(window.sliceCount)/\(ScreenClass.current.totalSlices)")
+        let sc = ScreenClass.current
+        OverlayPanel.shared.showSlices(window.sliceCount, total: sc.totalSlices)
+        slog("Slices → \(window.sliceCount)/\(sc.totalSlices)")
         ensureWindowVisible(at: ws.focusIndex)
     }
 
@@ -563,6 +567,7 @@ final class WorkspaceManager {
             }
         }
 
+        OverlayPanel.shared.showAppDefault(size.rawValue.uppercased(), appName: window.app.localizedName ?? "App")
         slog("App default → \(bundleId): \(size.rawValue) (\(count) windows updated)")
         ensureWindowVisible(at: ws.focusIndex)
     }
@@ -575,6 +580,7 @@ final class WorkspaceManager {
             window.applySize(size)
         }
         ws.scrollOffset = 0
+        OverlayPanel.shared.showMessage("Reset")
         slog("Reset all widths to app defaults (\(ws.windows.count) windows)")
         ensureWindowVisible(at: ws.focusIndex)
     }
