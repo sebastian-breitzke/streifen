@@ -79,26 +79,38 @@ final class HotkeyManager {
             return
         }
 
-        // Hyper+H / Hyper+Left / Hyper+ß(DE)/--(US): Focus left
-        if isHyper && (keyCode == 4 || keyCode == 123 || keyCode == 27) {
+        // Hyper+H / Hyper+Left: Focus left
+        if isHyper && (keyCode == 4 || keyCode == 123) {
             workspaceManager?.focusLeft()
             return
         }
 
-        // Hyper+L / Hyper+Right / Hyper+´(DE)/=(US): Focus right
-        if isHyper && (keyCode == 37 || keyCode == 124 || keyCode == 24) {
+        // Hyper+L / Hyper+Right: Focus right
+        if isHyper && (keyCode == 37 || keyCode == 124) {
             workspaceManager?.focusRight()
             return
         }
 
-        // Hyper+Shift+Left / Hyper+Shift+ß/- : Move window left in strip
-        if isHyperShift && (keyCode == 123 || keyCode == 27) {
+        // Hyper+ß (keyCode 27) / Hyper+NumPad- (keyCode 78): Slice -1
+        if isHyper && (keyCode == 27 || keyCode == 78) {
+            workspaceManager?.stepSlice(-1)
+            return
+        }
+
+        // Hyper+´ (keyCode 24) / Hyper+NumPad+ (keyCode 69): Slice +1
+        if isHyper && (keyCode == 24 || keyCode == 69) {
+            workspaceManager?.stepSlice(1)
+            return
+        }
+
+        // Hyper+Shift+Left: Move window left in strip
+        if isHyperShift && keyCode == 123 {
             workspaceManager?.moveWindowLeft()
             return
         }
 
-        // Hyper+Shift+Right / Hyper+Shift+´/= : Move window right in strip
-        if isHyperShift && (keyCode == 124 || keyCode == 24) {
+        // Hyper+Shift+Right: Move window right in strip
+        if isHyperShift && keyCode == 124 {
             workspaceManager?.moveWindowRight()
             return
         }
@@ -141,20 +153,35 @@ final class HotkeyManager {
             return
         }
 
-        // Hyper+F1-F5: Set T-Shirt size
-        let fKeySizes: [(UInt16, AppSize)] = [
-            (122, .full),  // F1
-            (120, .xl),    // F2
-            (99,  .l),     // F3
-            (118, .m),     // F4
-            (96,  .s),     // F5
+        // Hyper+F1-F8: Set slice count (ascending, capped at screen max)
+        let fKeySlices: [(UInt16, Int)] = [
+            (122, 1), // F1
+            (120, 2), // F2
+            (99,  3), // F3
+            (118, 4), // F4
+            (96,  5), // F5
+            (97,  6), // F6
+            (98,  7), // F7
+            (100, 8), // F8
         ]
 
-        for (fKey, size) in fKeySizes {
+        for (fKey, slices) in fKeySlices {
             if isHyper && keyCode == fKey {
-                workspaceManager?.setSize(size)
+                workspaceManager?.setSliceCount(slices)
                 return
             }
+        }
+
+        // Hyper+Shift+F1-F5: Set app-default size (ascending)
+        let shiftFKeySizes: [(UInt16, AppSize)] = [
+            (122, .xs),  // Shift+F1
+            (120, .s),   // Shift+F2
+            (99,  .m),   // Shift+F3
+            (118, .l),   // Shift+F4
+            (96,  .xl),  // Shift+F5
+        ]
+
+        for (fKey, size) in shiftFKeySizes {
             if isHyperShift && keyCode == fKey {
                 workspaceManager?.setAppDefaultSize(size)
                 return
@@ -249,10 +276,11 @@ private let relevantCGFlags: CGEventFlags = [.maskControl, .maskAlternate, .mask
 // Registered keycode sets for fast matching
 private let numberKeyCodes: Set<UInt16> = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 private let numpadKeyCodes: Set<UInt16> = [83, 84, 85, 86, 87, 88, 89, 91, 92]
-private let navLeftCodes: Set<UInt16> = [4, 123, 27]   // H, Left, ß
-private let navRightCodes: Set<UInt16> = [37, 124, 24]  // L, Right, ´
-private let arrowVertCodes: Set<UInt16> = [126, 125]     // Up, Down
-private let fKeyCodes: Set<UInt16> = [122, 120, 99, 118, 96] // F1-F5
+private let navLeftCodes: Set<UInt16> = [4, 123]          // H, Left
+private let navRightCodes: Set<UInt16> = [37, 124]         // L, Right
+private let sliceStepCodes: Set<UInt16> = [27, 78, 24, 69] // ß, NumPad-, ´, NumPad+
+private let arrowVertCodes: Set<UInt16> = [126, 125]        // Up, Down
+private let fKeyCodes: Set<UInt16> = [122, 120, 99, 118, 96, 97, 98, 100] // F1-F8
 
 private func isRegisteredHotkey(_ keyCode: UInt16, isHyper: Bool, isHyperShift: Bool) -> Bool {
     let allNav = numberKeyCodes.union(numpadKeyCodes).union(arrowVertCodes)
@@ -260,11 +288,12 @@ private func isRegisteredHotkey(_ keyCode: UInt16, isHyper: Bool, isHyperShift: 
     if isHyper {
         if allNav.contains(keyCode) { return true }
         if navLeftCodes.contains(keyCode) || navRightCodes.contains(keyCode) { return true }
+        if sliceStepCodes.contains(keyCode) { return true }
         if fKeyCodes.contains(keyCode) { return true }
     }
     if isHyperShift {
         if allNav.contains(keyCode) { return true }
-        if keyCode == 123 || keyCode == 27 || keyCode == 124 || keyCode == 24 { return true }
+        if keyCode == 123 || keyCode == 124 { return true } // Shift+Left/Right for reorder
         if fKeyCodes.contains(keyCode) { return true }
         if keyCode == 53 || keyCode == 111 { return true } // Esc, F12
     }

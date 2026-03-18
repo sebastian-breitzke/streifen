@@ -16,30 +16,23 @@ extension NSScreen {
 enum AppSize: String, Sendable, Codable, CaseIterable {
     case xs, s, m, l, xl, full
 
-    /// Resolve to a concrete width ratio based on screen class
-    func ratio(for screenClass: ScreenClass) -> CGFloat {
+    /// Default slice count for this size on a given screen class
+    func slices(for screenClass: ScreenClass) -> Int {
         switch (self, screenClass) {
-        case (.xs, .laptop):    return 0.33
-        case (.xs, .desktop):   return 0.20
-        case (.xs, .ultrawide): return 0.20
-
-        case (.s, .laptop):     return 0.50
-        case (.s, .desktop):    return 0.25
-        case (.s, .ultrawide):  return 0.20
-
-        case (.m, .laptop):     return 1.00
-        case (.m, .desktop):    return 0.33
-        case (.m, .ultrawide):  return 0.25
-
-        case (.l, .laptop):     return 1.00
-        case (.l, .desktop):    return 0.50
-        case (.l, .ultrawide):  return 0.33
-
-        case (.xl, .laptop):    return 1.00
-        case (.xl, .desktop):   return 0.67
-        case (.xl, .ultrawide): return 0.50
-
-        case (.full, _):        return 1.00
+        case (.xs, _):            return 1
+        case (.s,  _):            return 2
+        case (.m,  .laptop):      return 4
+        case (.m,  .desktop):     return 2
+        case (.m,  .ultrawide):   return 3
+        case (.l,  .laptop):      return 4
+        case (.l,  .desktop):     return 3
+        case (.l,  .ultrawide):   return 4
+        case (.xl, .laptop):      return 4
+        case (.xl, .desktop):     return 4
+        case (.xl, .ultrawide):   return 6
+        case (.full, .laptop):    return 4
+        case (.full, .desktop):   return 6
+        case (.full, .ultrawide): return 8
         }
     }
 }
@@ -48,6 +41,15 @@ enum ScreenClass: String, Sendable {
     case laptop     // aspect < 1.5
     case desktop    // 1.5 – 2.3
     case ultrawide  // ≥ 2.3
+
+    /// Total number of horizontal slices for this screen class
+    var totalSlices: Int {
+        switch self {
+        case .laptop:    return 4
+        case .desktop:   return 6
+        case .ultrawide: return 8
+        }
+    }
 
     static var current: ScreenClass {
         guard let screen = NSScreen.managed?.visibleFrame else { return .desktop }
@@ -117,15 +119,25 @@ struct StreifenConfig: Sendable {
             "com.apple.Safari": .l,
             "app.zen-browser.zen": .l,
             "org.mozilla.firefox": .l,
-            // IDEs → L
+            // Code Editor → L
             "com.microsoft.VSCode": .l,
-            "com.jetbrains.rider": .l,
-            "com.jetbrains.intellij": .l,
-            "com.jetbrains.WebStorm": .l,
+            // IDEs → XL
+            "com.jetbrains.rider": .xl,
+            "com.jetbrains.intellij": .xl,
+            "com.jetbrains.WebStorm": .xl,
+            // Spreadsheet → XL
+            "com.microsoft.Excel": .xl,
             // Communication → M
             "com.microsoft.teams2": .m,
             "com.microsoft.Outlook": .m,
             "com.tinyspeck.slackmacgap": .m,
+            "com.tdesktop.Telegram": .m,
+            "net.whatsapp.WhatsApp": .m,
+            "org.whispersystems.signal-desktop": .m,
+            "com.hnc.Discord": .m,
+            // Video → M
+            "us.zoom.xos": .m,
+            "com.electron.realtimeboard": .m,
             // Small tools → XS
             "com.apple.calculator": .xs,
             // Utilities → S

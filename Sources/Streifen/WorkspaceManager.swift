@@ -53,10 +53,10 @@ final class WorkspaceManager {
             let sc = ScreenClass.current
             slog("Screen parameters changed → \(sc.rawValue) — recalculating all sizes")
 
-            // Recalculate all widthRatios for the new screen class
+            // Recalculate all slice counts for the new screen class
             for ws in workspaces.values {
                 for window in ws.windows {
-                    window.widthRatio = window.appSize.ratio(for: sc)
+                    window.sliceCount = window.appSize.slices(for: sc)
                 }
             }
 
@@ -307,14 +307,15 @@ final class WorkspaceManager {
         let peek = config.peekWidth
         let hasNeighbors = ws.windows.count > 1
         let maxW = screen.width - (2 * gap) - (2 * peek)
+        let sc = ScreenClass.current
 
         var windowX: CGFloat = gap
         for i in 0..<index {
-            var w = screen.width * ws.windows[i].widthRatio - (2 * gap)
+            var w = screen.width * CGFloat(ws.windows[i].sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
             if hasNeighbors { w = min(w, maxW) }
             windowX += max(w, 200) + gap
         }
-        var windowWidth = screen.width * ws.windows[index].widthRatio - (2 * gap)
+        var windowWidth = screen.width * CGFloat(ws.windows[index].sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
         if hasNeighbors { windowWidth = min(windowWidth, maxW) }
         windowWidth = max(windowWidth, 200)
 
@@ -476,16 +477,26 @@ final class WorkspaceManager {
         ensureWindowVisible(at: ws.focusIndex)
     }
 
-    // MARK: - T-Shirt Sizing
+    // MARK: - Slice Sizing
 
-    /// Set focused window to a T-Shirt size (resolves to ratio based on screen class)
-    func setSize(_ size: AppSize) {
+    /// Set focused window to a specific slice count
+    func setSliceCount(_ count: Int) {
         let ws = activeWorkspace
         guard ws.focusIndex < ws.windows.count else { return }
         let window = ws.windows[ws.focusIndex]
-        window.applySize(size)
+        window.setSliceCount(count)
         let sc = ScreenClass.current
-        slog("Size → \(size.rawValue) (\(Int(window.widthRatio * 100))% on \(sc.rawValue))")
+        slog("Slices → \(window.sliceCount)/\(sc.totalSlices)")
+        ensureWindowVisible(at: ws.focusIndex)
+    }
+
+    /// Step focused window's slice count by delta (+1 or -1)
+    func stepSlice(_ delta: Int) {
+        let ws = activeWorkspace
+        guard ws.focusIndex < ws.windows.count else { return }
+        let window = ws.windows[ws.focusIndex]
+        window.setSliceCount(window.sliceCount + delta)
+        slog("Slices → \(window.sliceCount)/\(ScreenClass.current.totalSlices)")
         ensureWindowVisible(at: ws.focusIndex)
     }
 
@@ -509,14 +520,6 @@ final class WorkspaceManager {
         }
 
         slog("App default → \(bundleId): \(size.rawValue) (\(count) windows updated)")
-        ensureWindowVisible(at: ws.focusIndex)
-    }
-
-    func setWidthRatio(_ ratio: CGFloat) {
-        let ws = activeWorkspace
-        guard ws.focusIndex < ws.windows.count else { return }
-        ws.windows[ws.focusIndex].widthRatio = ratio
-        slog("Width → \(ratio) (\(Int(ratio * 100))%)")
         ensureWindowVisible(at: ws.focusIndex)
     }
 
@@ -623,7 +626,7 @@ final class WorkspaceManager {
                 state.append([
                     "windowId": Int(window.windowId),
                     "workspace": wsId,
-                    "widthRatio": Double(window.widthRatio),
+                    "sliceCount": window.sliceCount,
                     "appSize": window.appSize.rawValue,
                     "bundleId": window.bundleId ?? "",
                     "title": window.title,
@@ -659,16 +662,17 @@ final class WorkspaceManager {
         let scrollOffsets = wrapper["scrollOffsets"] as? [String: Double] ?? [:]
 
         // Build lookups: try windowId first, fallback to bundleId+title
-        var idLookup: [CGWindowID: (Int, CGFloat)] = [:]
-        var keyLookup: [String: (Int, CGFloat)] = [:]
+        var idLookup: [CGWindowID: (Int, Int?)] = [:]  // wsId, sliceCount (nil = recalc from appSize)
+        var keyLookup: [String: (Int, Int?)] = [:]
         for entry in windowStates {
-            guard let wsId = entry["workspace"] as? Int,
-                  let ratio = entry["widthRatio"] as? Double else { continue }
+            guard let wsId = entry["workspace"] as? Int else { continue }
+            // New format: sliceCount (Int). Old format: widthRatio (Float) → ignore, recalc.
+            let slices = entry["sliceCount"] as? Int
             if let wid = entry["windowId"] as? Int {
-                idLookup[CGWindowID(wid)] = (wsId, CGFloat(ratio))
+                idLookup[CGWindowID(wid)] = (wsId, slices)
             }
             if let bid = entry["bundleId"] as? String, let title = entry["title"] as? String {
-                keyLookup["\(bid)|\(title)"] = (wsId, CGFloat(ratio))
+                keyLookup["\(bid)|\(title)"] = (wsId, slices)
             }
         }
 
@@ -677,6 +681,7 @@ final class WorkspaceManager {
         // Use passed-in windows (from windowTracker) since workspaces are empty at startup
         let allWindows = currentWindows
         for ws in workspaces.values { ws.windows.removeAll() }
+        let sc = ScreenClass.current
 
         var restored = 0
 
@@ -684,9 +689,13 @@ final class WorkspaceManager {
             let match = idLookup[window.windowId]
                 ?? keyLookup["\(window.bundleId ?? "")|\(window.title)"]
 
-            if let (wsId, ratio) = match {
-                window.widthRatio = ratio
-                // Restore appSize from config (ratio was persisted as override)
+            if let (wsId, slices) = match {
+                if let slices {
+                    window.sliceCount = max(1, min(slices, sc.totalSlices))
+                } else {
+                    // Old format — recalculate from appSize
+                    window.sliceCount = window.appSize.slices(for: sc)
+                }
                 window.appSize = config.sizeFor(bundleId: window.bundleId)
                 workspaces[wsId]?.windows.append(window)
                 if wsId != savedActiveWs {

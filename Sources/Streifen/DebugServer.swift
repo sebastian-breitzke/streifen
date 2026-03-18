@@ -185,7 +185,8 @@ final class DebugServer {
             "bundleId": w.bundleId ?? "",
             "title": w.title,
             "appSize": w.appSize.rawValue,
-            "widthRatio": round(w.widthRatio * 1000) / 1000,
+            "sliceCount": w.sliceCount,
+            "totalSlices": ScreenClass.current.totalSlices,
             "resizable": w.resizable,
             "frame": [
                 "x": round(w.frame.origin.x),

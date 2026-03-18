@@ -23,8 +23,9 @@ final class StripLayout {
 
         var x = screenFrame.origin.x + gap + workspace.scrollOffset
 
+        let sc = ScreenClass.current
         for window in windows {
-            var windowWidth = screenFrame.width * window.widthRatio - (2 * gap)
+            var windowWidth = screenFrame.width * CGFloat(window.sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
             // Cap width for peek (only if there are neighbors)
             let hasNeighbors = windows.count > 1
             if hasNeighbors {
@@ -66,9 +67,10 @@ final class StripLayout {
         let peek = config.peekWidth
         let maxWidth = screenFrame.width - (2 * gap) - (2 * peek)
         let hasNeighbors = workspace.windows.count > 1
+        let sc = ScreenClass.current
         var total: CGFloat = gap
         for window in workspace.windows {
-            var windowWidth = screenFrame.width * window.widthRatio - (2 * gap)
+            var windowWidth = screenFrame.width * CGFloat(window.sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
             if hasNeighbors { windowWidth = min(windowWidth, maxWidth) }
             total += max(windowWidth, 200) + gap
         }

@@ -7,7 +7,7 @@ final class TrackedWindow: @unchecked Sendable {
     let app: NSRunningApplication
     var frame: CGRect
     var virtualX: CGFloat
-    var widthRatio: CGFloat
+    var sliceCount: Int
     var appSize: AppSize
     var category: String?
     var resizable: Bool = true
@@ -19,7 +19,7 @@ final class TrackedWindow: @unchecked Sendable {
         self.frame = frame
         self.virtualX = frame.origin.x
         self.appSize = appSize
-        self.widthRatio = appSize.ratio(for: ScreenClass.current)
+        self.sliceCount = appSize.slices(for: ScreenClass.current)
         self.category = nil
         self.resizable = (try? axElement.attributeIsSettable(.size)) ?? false
     }
@@ -57,9 +57,15 @@ final class TrackedWindow: @unchecked Sendable {
         setSize(rect.size)
     }
 
-    /// Update size and recalculate ratio for current screen
+    /// Update size and recalculate slices for current screen
     func applySize(_ size: AppSize) {
         appSize = size
-        widthRatio = size.ratio(for: ScreenClass.current)
+        sliceCount = size.slices(for: ScreenClass.current)
+    }
+
+    /// Set slice count directly, clamped to screen limits
+    func setSliceCount(_ count: Int) {
+        let sc = ScreenClass.current
+        sliceCount = max(1, min(count, sc.totalSlices))
     }
 }
