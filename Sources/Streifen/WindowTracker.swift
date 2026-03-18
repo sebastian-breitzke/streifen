@@ -269,10 +269,19 @@ final class WindowTracker {
         guard !isUpdating else { return }
         var pruned = false
         for (id, window) in trackedWindows {
+            // Only prune if AX position is unreadable AND the app is no longer running.
+            // Off-screen parked windows (other workspaces) can have stale AX handles
+            // but are still valid — the app is alive, so keep them.
             if (try? window.axElement.attribute(.position) as CGPoint?) == nil {
-                slog("Prune dead window \(id): \(window.app.localizedName ?? "?")")
-                trackedWindows.removeValue(forKey: id)
-                pruned = true
+                if window.app.isTerminated {
+                    slog("Prune dead window \(id): \(window.app.localizedName ?? "?") (app terminated)")
+                    trackedWindows.removeValue(forKey: id)
+                    pruned = true
+                } else {
+                    // AX handle stale but app alive — try to re-discover
+                    slog("Stale AX handle for \(id): \(window.app.localizedName ?? "?") — re-discovering")
+                    discoverWindows(for: window.app)
+                }
             }
         }
         if pruned { notifyChanged() }
