@@ -192,6 +192,22 @@ final class WorkspaceManager {
         updateMenuBar()
     }
 
+    /// Snap a manually resized window to the nearest slice count
+    func handleManualResize(windowId: CGWindowID) {
+        guard let screen = NSScreen.managed?.visibleFrame else { return }
+        let ws = activeWorkspace
+        guard let window = ws.windows.first(where: { $0.windowId == windowId }) else { return }
+
+        let sc = ScreenClass.current
+        let sliceWidth = screen.width / CGFloat(sc.totalSlices)
+        let newSlices = max(1, min(Int(round(window.frame.width / sliceWidth)), sc.totalSlices))
+
+        guard newSlices != window.sliceCount else { return }
+        window.sliceCount = newSlices
+        slog("Manual resize → \(window.title): \(newSlices) slices")
+        ensureWindowVisible(at: ws.focusIndex)
+    }
+
     // MARK: - Workspace Switching
 
     func switchTo(workspace targetId: Int) {

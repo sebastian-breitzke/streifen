@@ -6,6 +6,7 @@ final class WindowTracker {
     var onWindowsChanged: (([TrackedWindow]) -> Void)?
     var onAppActivated: ((NSRunningApplication) -> Void)?
     var onWindowFocused: ((CGWindowID) -> Void)?
+    var onWindowResized: ((CGWindowID) -> Void)?
     var config: StreifenConfig
 
     private var trackedWindows: [CGWindowID: TrackedWindow] = [:]
@@ -163,6 +164,15 @@ final class WindowTracker {
         case .windowCreated:
             if let app = NSRunningApplication(processIdentifier: pid) {
                 discoverWindows(for: app)
+                // Retry after delay — torn-off tabs may not be ready on first attempt
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    guard let self else { return }
+                    let before = self.trackedWindows.count
+                    self.discoverWindows(for: app)
+                    if self.trackedWindows.count > before {
+                        self.notifyChanged()
+                    }
+                }
             }
         case .uiElementDestroyed:
             // Try to match the destroyed element directly
@@ -200,10 +210,15 @@ final class WindowTracker {
                 onWindowFocused?(wid)
             }
         case .moved, .resized:
-            for (_, window) in trackedWindows where window.app.processIdentifier == pid {
+            for (wid, window) in trackedWindows where window.app.processIdentifier == pid {
                 if let pos: CGPoint = try? window.axElement.attribute(.position),
                    let size: CGSize = try? window.axElement.attribute(.size) {
+                    let oldSize = window.frame.size
                     window.frame = CGRect(origin: pos, size: size)
+                    // If width changed (manual resize), snap sliceCount to nearest grid
+                    if notification == .resized && abs(size.width - oldSize.width) > 10 {
+                        onWindowResized?(wid)
+                    }
                 }
             }
         default:
