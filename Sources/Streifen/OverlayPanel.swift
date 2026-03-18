@@ -18,8 +18,10 @@ final class OverlayPanel {
     private var panel: NSPanel?
     private var hideTask: DispatchWorkItem?
 
-    private let displayDuration: TimeInterval = 0.6
-    private let fadeDuration: TimeInterval = 0.25
+    private let panelWidth: CGFloat = 280
+    private let panelHeight: CGFloat = 120
+    private let displayDuration: TimeInterval = 0.8
+    private let fadeDuration: TimeInterval = 0.3
 
     /// Show a workspace switch indicator
     func showWorkspace(_ number: Int) {
@@ -83,19 +85,14 @@ final class OverlayPanel {
 
         guard let panel else { return }
 
-        // Size to content
-        let fittingSize = view.fittingSize
-        let contentSize = NSSize(
-            width: max(fittingSize.width + 48, 140),
-            height: max(fittingSize.height + 32, 80)
-        )
+        let contentSize = NSSize(width: panelWidth, height: panelHeight)
 
-        // Center on managed screen
+        // Fixed position: center-top area of managed screen
         let screen = NSScreen.managed ?? NSScreen.main ?? NSScreen.screens.first!
         let screenFrame = screen.frame
         let origin = NSPoint(
             x: screenFrame.midX - contentSize.width / 2,
-            y: screenFrame.midY - contentSize.height / 2 + screenFrame.height * 0.1
+            y: screenFrame.midY - contentSize.height / 2 + screenFrame.height * 0.15
         )
 
         panel.setFrame(NSRect(origin: origin, size: contentSize), display: false)
@@ -134,31 +131,32 @@ private struct OverlayView: View {
     private var isDark: Bool { colorScheme == .dark }
 
     var body: some View {
-        VStack(spacing: 4) {
-            Text(primary)
-                .font(.system(size: fontSize, weight: .black, design: .rounded))
-                .foregroundStyle(isDark ? Color.white : accent)
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-
-            if let secondary {
-                Text(secondary)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(isDark ? Color.white.opacity(0.35) : Color(white: 0.5))
-                    .textCase(.uppercase)
-                    .tracking(3)
-            }
-        }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 20)
-        .background(
+        ZStack {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(isDark ? Color(white: 0.1) : Color(red: 0.98, green: 0.97, blue: 0.95))
                 .shadow(color: .black.opacity(isDark ? 0.5 : 0.1), radius: 24, y: 8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(isDark ? accent.opacity(0.35) : Color(white: 0.88), lineWidth: 1)
+                        .strokeBorder(isDark ? accent.opacity(0.35) : accent.opacity(0.25), lineWidth: 4.5)
                 )
-        )
+
+            VStack(spacing: 4) {
+                Text(primary)
+                    .font(.system(size: fontSize, weight: .black, design: .rounded))
+                    .foregroundStyle(isDark ? Color.white : accent)
+                    .minimumScaleFactor(0.4)
+                    .lineLimit(1)
+
+                if let secondary {
+                    Text(secondary)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(isDark ? Color.white.opacity(0.35) : Color(white: 0.5))
+                        .textCase(.uppercase)
+                        .tracking(3)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .frame(width: 280, height: 120)
     }
 }
