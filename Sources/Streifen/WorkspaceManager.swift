@@ -20,6 +20,11 @@ let offscreenPark = CGPoint(x: 99999, y: 99999)
 
 @MainActor
 final class WorkspaceManager {
+    private struct WindowStripMetrics {
+        let x: CGFloat
+        let width: CGFloat
+    }
+
     private(set) var workspaces: [Int: Workspace] = [:]
     private(set) var activeWorkspaceId: Int = 1
     var config: StreifenConfig
@@ -118,6 +123,7 @@ final class WorkspaceManager {
             slog("  WS \(wsId): \(names)")
         }
         slog("Initial sort: \(windows.count) windows")
+        saveState()
     }
 
     // MARK: - Window Updates
@@ -187,6 +193,7 @@ final class WorkspaceManager {
                 layoutActiveWorkspace()
             }
             activateFocusedWindow()
+            saveState()
         }
 
         updateMenuBar()
@@ -206,6 +213,7 @@ final class WorkspaceManager {
         window.sliceCount = newSlices
         slog("Manual resize → \(window.title): \(newSlices) slices")
         ensureWindowVisible(at: ws.focusIndex)
+        saveState()
     }
 
     // MARK: - Workspace Switching
@@ -318,24 +326,13 @@ final class WorkspaceManager {
         let ws = activeWorkspace
         guard index < ws.windows.count else { return }
 
-        // Calculate where window sits in the strip (sum of previous widths)
-        let gap = config.gap
-        let peek = config.peekWidth
-        let hasNeighbors = ws.windows.count > 1
-        let maxW = screen.width - (2 * gap) - (2 * peek)
-        let sc = ScreenClass.current
-
-        var windowX: CGFloat = gap
-        for i in 0..<index {
-            var w = screen.width * CGFloat(ws.windows[i].sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
-            if hasNeighbors { w = min(w, maxW) }
-            windowX += max(w, 200) + gap
-        }
-        var windowWidth = screen.width * CGFloat(ws.windows[index].sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
-        if hasNeighbors { windowWidth = min(windowWidth, maxW) }
-        windowWidth = max(windowWidth, 200)
+        let metrics = stripMetrics(for: ws, screen: screen)
+        let windowX = metrics[index].x
+        let windowWidth = metrics[index].width
 
         // Peek margins: reserve space for neighbor peek
+        let gap = config.gap
+        let peek = config.peekWidth
         let leftPeek: CGFloat = index > 0 ? peek : 0
         let rightPeek: CGFloat = index < ws.windows.count - 1 ? peek : 0
 
@@ -355,6 +352,37 @@ final class WorkspaceManager {
         }
 
         layoutActiveWorkspace()
+    }
+
+    func scrollActiveWorkspace(by delta: CGFloat) {
+        let ws = activeWorkspace
+        guard !ws.windows.isEmpty else { return }
+        ws.scrollOffset += delta
+        clampScrollOffset(ws)
+        layoutActiveWorkspace()
+    }
+
+    func snapActiveWorkspaceToNearestWindow() {
+        guard let screen = NSScreen.managed?.visibleFrame else { return }
+        let ws = activeWorkspace
+        guard !ws.windows.isEmpty else { return }
+
+        let metrics = stripMetrics(for: ws, screen: screen)
+        let screenCenter = screen.width / 2
+
+        guard let nearest = metrics.enumerated().min(by: { lhs, rhs in
+            let lhsCenter = lhs.element.x + ws.scrollOffset + lhs.element.width / 2
+            let rhsCenter = rhs.element.x + ws.scrollOffset + rhs.element.width / 2
+            return abs(lhsCenter - screenCenter) < abs(rhsCenter - screenCenter)
+        }) else {
+            return
+        }
+
+        ws.focusIndex = nearest.offset
+        ws.scrollOffset = screenCenter - (nearest.element.x + nearest.element.width / 2)
+        clampScrollOffset(ws)
+        layoutActiveWorkspace()
+        activateFocusedWindow()
     }
 
     // MARK: - App Focus (Cmd+Tab etc.)
@@ -574,6 +602,28 @@ final class WorkspaceManager {
         }
     }
 
+    private func stripMetrics(for ws: Workspace, screen: CGRect) -> [WindowStripMetrics] {
+        let gap = config.gap
+        let peek = config.peekWidth
+        let hasNeighbors = ws.windows.count > 1
+        let maxW = screen.width - (2 * gap) - (2 * peek)
+        let sc = ScreenClass.current
+
+        var x: CGFloat = gap
+        var metrics: [WindowStripMetrics] = []
+        metrics.reserveCapacity(ws.windows.count)
+
+        for window in ws.windows {
+            var width = screen.width * CGFloat(window.sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
+            if hasNeighbors { width = min(width, maxW) }
+            width = max(width, 200)
+            metrics.append(WindowStripMetrics(x: x, width: width))
+            x += width + gap
+        }
+
+        return metrics
+    }
+
     private func layoutActiveWorkspace() {
         guard let screen = NSScreen.managed?.visibleFrame else { return }
         windowTracker?.beginProgrammaticUpdate()
@@ -738,6 +788,7 @@ final class WorkspaceManager {
         activateFocusedWindow()
         updateMenuBar()
         slog("State restored (\(restored)/\(allWindows.count) windows matched, age \(Int(age))s)")
+        saveState()
         return true
     }
 
