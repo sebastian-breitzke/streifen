@@ -82,6 +82,7 @@ Every app gets a default size based on its bundle ID:
 | `Hyper + H` or `Hyper + ←` | Focus previous window |
 | `Hyper + L` or `Hyper + →` | Focus next window |
 | `Hyper + Shift + ←/→` | Reorder window in strip |
+| `4-finger pan ←/→` | Smooth-scroll strip, then snap to the centered window |
 
 ### Sizing — Slice Grid
 
@@ -139,6 +140,7 @@ HTTP server on `localhost:22222`.
 - **Swift 6** + SwiftUI (MenuBarExtra)
 - **AXSwift** — Type-safe Accessibility API
 - **HotKey** — Global keyboard shortcuts
+- **MultitouchSupport** — Raw trackpad input for smooth 4-finger strip navigation
 - **TOMLKit** — Config parsing (prepared)
 
 ---
@@ -150,7 +152,7 @@ HTTP server on `localhost:22222`.
 - [x] Strip layout + peek
 - [x] Slice grid + app-aware defaults
 - [ ] TOML config + persistence
-- [ ] Trackpad gestures (3-finger swipe)
+- [x] Trackpad gestures (smooth 4-finger pan + snap)
 - [ ] Multi-monitor support
 
 ---
