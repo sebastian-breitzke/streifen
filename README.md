@@ -87,8 +87,8 @@ Every app gets a default size based on its bundle ID:
 | Shortcut | Action |
 |----------|--------|
 | `Hyper + F1–F8` | Set slice count (1 → 8) |
-| `Hyper + ß` | Step −1 slice |
-| `Hyper + ´` | Step +1 slice |
+| `Hyper + -` or `Hyper + ß` | Step −1 slice |
+| `Hyper + +` or `Hyper + ´` | Step +1 slice |
 | `Hyper + Shift + F1–F5` | Set app default (XS → XL) |
 | `Hyper + Shift + Esc` | Reset all windows to defaults |
 

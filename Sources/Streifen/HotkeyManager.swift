@@ -91,14 +91,14 @@ final class HotkeyManager {
             return
         }
 
-        // Hyper+ß (keyCode 27) / Hyper+NumPad- (keyCode 78): Slice -1
-        if isHyper && (keyCode == 27 || keyCode == 78) {
+        // Hyper+ß (27) / Hyper+- (44) / Hyper+NumPad- (78): Slice -1
+        if isHyper && (keyCode == 27 || keyCode == 44 || keyCode == 78) {
             workspaceManager?.stepSlice(-1)
             return
         }
 
-        // Hyper+´ (keyCode 24) / Hyper+NumPad+ (keyCode 69): Slice +1
-        if isHyper && (keyCode == 24 || keyCode == 69) {
+        // Hyper+´ (24) / Hyper++ (30) / Hyper+NumPad+ (69): Slice +1
+        if isHyper && (keyCode == 24 || keyCode == 30 || keyCode == 69) {
             workspaceManager?.stepSlice(1)
             return
         }
@@ -278,7 +278,7 @@ private let numberKeyCodes: Set<UInt16> = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 private let numpadKeyCodes: Set<UInt16> = [83, 84, 85, 86, 87, 88, 89, 91, 92]
 private let navLeftCodes: Set<UInt16> = [4, 123]          // H, Left
 private let navRightCodes: Set<UInt16> = [37, 124]         // L, Right
-private let sliceStepCodes: Set<UInt16> = [27, 78, 24, 69] // ß, NumPad-, ´, NumPad+
+private let sliceStepCodes: Set<UInt16> = [27, 44, 78, 24, 30, 69] // ß, -, NumPad-, ´, +, NumPad+
 private let arrowVertCodes: Set<UInt16> = [126, 125]        // Up, Down
 private let fKeyCodes: Set<UInt16> = [122, 120, 99, 118, 96, 97, 98, 100] // F1-F8
 

@@ -54,20 +54,23 @@ final class WorkspaceManager {
     }
 
     @objc private func handleScreenChange(_ notification: Notification) {
-        Task { @MainActor in
+        // Delay: NSScreen.screens may not reflect the new configuration immediately
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
             let sc = ScreenClass.current
-            slog("Screen parameters changed → \(sc.rawValue) — recalculating all sizes")
+            let screen = NSScreen.managed?.visibleFrame
+            slog("Screen parameters changed → \(sc.rawValue) (\(Int(screen?.width ?? 0))×\(Int(screen?.height ?? 0))) — recalculating all sizes")
 
             // Recalculate all slice counts for the new screen class
-            for ws in workspaces.values {
+            for ws in self.workspaces.values {
                 for window in ws.windows {
                     window.sliceCount = window.appSize.slices(for: sc)
                 }
             }
 
-            clampScrollOffset(activeWorkspace)
-            layoutActiveWorkspace()
-            activateFocusedWindow()
+            self.clampScrollOffset(self.activeWorkspace)
+            self.layoutActiveWorkspace()
+            self.activateFocusedWindow()
         }
     }
 
@@ -231,9 +234,11 @@ final class WorkspaceManager {
 
         windowTracker?.beginProgrammaticUpdate()
 
-        // Hide current workspace windows off-screen
+        // Hide current workspace windows off-screen (skip already-parked)
         for window in activeWorkspace.windows {
-            window.setPosition(offscreenPark)
+            if window.frame.origin.x != offscreenPark.x {
+                window.setPosition(offscreenPark)
+            }
         }
         activeWorkspace.isVisible = false
 
@@ -645,21 +650,25 @@ final class WorkspaceManager {
         }
     }
 
-    /// Force-park all windows on inactive workspaces. Retries after a short delay
-    /// because some apps (Ghostty, Zen) silently ignore AX position changes when
-    /// they are not the frontmost app.
+    /// Force-park all windows on inactive workspaces. Retries multiple times
+    /// because some apps (Ghostty, Zen, Teams, Edge) silently ignore AX position
+    /// changes when they are not the frontmost app.
     private func scheduleOffscreenSweep() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            guard let self else { return }
-            self.windowTracker?.beginProgrammaticUpdate()
-            for ws in self.workspaces.values where !ws.isVisible {
-                for window in ws.windows {
-                    if window.frame.origin.x != offscreenPark.x || window.frame.origin.y != offscreenPark.y {
-                        window.setPosition(offscreenPark)
+        for delay in [0.1, 0.3, 0.8] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                self.windowTracker?.beginProgrammaticUpdate()
+                for ws in self.workspaces.values where !ws.isVisible {
+                    for window in ws.windows {
+                        // Check actual AX position, not just our cached frame
+                        let actualPos: CGPoint? = try? window.axElement.attribute(.position)
+                        if let pos = actualPos, pos.x != offscreenPark.x {
+                            window.setPosition(offscreenPark)
+                        }
                     }
                 }
+                self.windowTracker?.endProgrammaticUpdate()
             }
-            self.windowTracker?.endProgrammaticUpdate()
         }
     }
 
@@ -672,21 +681,31 @@ final class WorkspaceManager {
         }
     }
 
-    /// Activate windows on the active workspace so they render at their AX-set positions.
-    /// Apps like Zen/Firefox ignore AX position changes unless their window is raised.
+    /// Activate the focused window and raise others with a slight delay so the
+    /// focused window appears instantly while background windows catch up.
     private func activateFocusedWindow() {
         let ws = activeWorkspace
         guard ws.focusIndex < ws.windows.count else { return }
 
-        // Raise all windows — forces each app to render at AX positions
-        for window in ws.windows {
-            try? window.axElement.performAction(.raise)
-        }
-
-        // Activate the focused window's app last so it ends up in front
+        // Activate focused window immediately
         let focused = ws.windows[ws.focusIndex]
+        try? focused.axElement.performAction(.raise)
         try? focused.axElement.setAttribute(.main, value: true)
         focused.app.activate()
+
+        // Raise remaining windows async — they're already positioned by layout,
+        // just need a raise to force apps to render at AX-set positions
+        let others = ws.windows.enumerated().filter { $0.offset != ws.focusIndex }.map { $0.element }
+        if !others.isEmpty {
+            DispatchQueue.main.async {
+                for window in others {
+                    try? window.axElement.performAction(.raise)
+                }
+                // Re-raise focused so it stays in front
+                try? focused.axElement.performAction(.raise)
+                focused.app.activate()
+            }
+        }
     }
 
     // MARK: - Reset
