@@ -26,7 +26,7 @@ enum AppSize: String, Sendable, Codable, CaseIterable {
         case (.m,  .ultrawide):   return 3
         case (.l,  .laptop):      return 4
         case (.l,  .desktop):     return 3
-        case (.l,  .ultrawide):   return 4
+        case (.l,  .ultrawide):   return 3
         case (.xl, .laptop):      return 4
         case (.xl, .desktop):     return 4
         case (.xl, .ultrawide):   return 6
@@ -74,6 +74,9 @@ struct StreifenConfig: Sendable {
     /// Follow apps: when focused from another workspace, move to current workspace
     var followApps: Set<String>    // bundleIds
 
+    /// Floating apps: tracked but not in strip layout, always visible, survive workspace switches
+    var floatingApps: Set<String>  // bundleIds
+
     /// App-specific T-Shirt sizes
     var appSizes: [String: AppSize]  // bundleId → size
 
@@ -103,6 +106,8 @@ struct StreifenConfig: Sendable {
         followApps: [
             "com.binarynights.ForkLift",
             "com.apple.finder",
+        ],
+        floatingApps: [
             "com.apple.calculator",
         ],
         appSizes: [
@@ -136,8 +141,7 @@ struct StreifenConfig: Sendable {
             // Video → M
             "us.zoom.xos": .m,
             "com.electron.realtimeboard": .m,
-            // Small tools → XS
-            "com.apple.calculator": .xs,
+            // Calculator is floating (see floatingApps)
             // Utilities → S
             "com.binarynights.ForkLift": .s,
             "com.apple.finder": .s,

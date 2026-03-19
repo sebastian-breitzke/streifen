@@ -21,7 +21,7 @@ Inspired by [PaperWM](https://github.com/paperwm/PaperWM) for GNOME. Rebuilt fro
               ← Hyper+H/L or arrow keys →
 ```
 
-- **Horizontal Strip** — Windows arranged side by side in a scrollable band. No grid, no floating, no stacking.
+- **Horizontal Strip** — Windows arranged side by side in a scrollable band. No grid, no stacking.
 - **9 Workspaces** — `Hyper+1`–`Hyper+9`. Each workspace has its own strip. Off-screen hiding, no SIP required.
 - **Slice Grid** — Your screen is a grid of columns. Window widths snap to integer slice counts. Same apps, different screens, always fitting.
 ---
@@ -46,7 +46,6 @@ Every app gets a default size based on its bundle ID:
 
 | Size | Apps |
 |------|------|
-| **XS** | Calculator |
 | **S** | Terminal, Ghostty, iTerm, Finder, ForkLift, Spotify |
 | **M** | Teams, Slack, Outlook, Telegram, WhatsApp, Signal, Discord, Zoom |
 | **L** | Browser, VS Code (default for unknown apps) |
@@ -56,6 +55,7 @@ Every app gets a default size based on its bundle ID:
 
 - **Pinned** — First window goes to a fixed workspace. Additional windows land wherever you are.
 - **Follow** — Focus the window and it moves to your current workspace.
+- **Floating** — Not part of the strip. Stays where you put it, always visible, survives workspace switches.
 - **Stay** — Windows stay where you put them. Switch away, they hide. Come back, they reappear.
 
 ---

@@ -94,6 +94,10 @@ final class WorkspaceManager {
 
         for window in windows {
             let bundleId = window.bundleId ?? ""
+
+            // Floating apps stay where they are — not managed by workspaces
+            if config.floatingApps.contains(bundleId) { continue }
+
             let targetWs: Workspace
 
             if let pinnedWsId = config.pinnedApps[bundleId],
@@ -137,6 +141,9 @@ final class WorkspaceManager {
         for window in windows {
             if !knownIds.contains(window.windowId) {
                 let bundleId = window.bundleId ?? ""
+
+                // Floating apps — not managed
+                if config.floatingApps.contains(bundleId) { continue }
                 let targetWs: Workspace
 
                 if let pinnedWsId = config.pinnedApps[bundleId],
@@ -236,9 +243,13 @@ final class WorkspaceManager {
         ensureWindowVisible(at: activeWorkspace.focusIndex)
 
         activateFocusedWindow()
+        raiseFloatingWindows()
 
         windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
+
+        // Delayed sweep: some apps ignore AX position changes when not frontmost
+        scheduleOffscreenSweep()
 
         saveState()
         OverlayPanel.shared.showWorkspace(targetId)
@@ -634,6 +645,33 @@ final class WorkspaceManager {
         }
     }
 
+    /// Force-park all windows on inactive workspaces. Retries after a short delay
+    /// because some apps (Ghostty, Zen) silently ignore AX position changes when
+    /// they are not the frontmost app.
+    private func scheduleOffscreenSweep() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return }
+            self.windowTracker?.beginProgrammaticUpdate()
+            for ws in self.workspaces.values where !ws.isVisible {
+                for window in ws.windows {
+                    if window.frame.origin.x != offscreenPark.x || window.frame.origin.y != offscreenPark.y {
+                        window.setPosition(offscreenPark)
+                    }
+                }
+            }
+            self.windowTracker?.endProgrammaticUpdate()
+        }
+    }
+
+    /// Raise all floating app windows so they stay on top after workspace switches.
+    private func raiseFloatingWindows() {
+        guard let tracker = windowTracker else { return }
+        for window in tracker.allWindows {
+            guard let bid = window.bundleId, config.floatingApps.contains(bid) else { continue }
+            try? window.axElement.performAction(.raise)
+        }
+    }
+
     /// Activate windows on the active workspace so they render at their AX-set positions.
     /// Apps like Zen/Firefox ignore AX position changes unless their window is raised.
     private func activateFocusedWindow() {
@@ -752,6 +790,9 @@ final class WorkspaceManager {
         var restored = 0
 
         for window in allWindows {
+            // Floating apps — skip
+            if let bid = window.bundleId, config.floatingApps.contains(bid) { continue }
+
             let match = idLookup[window.windowId]
                 ?? keyLookup["\(window.bundleId ?? "")|\(window.title)"]
 
@@ -787,6 +828,7 @@ final class WorkspaceManager {
         layoutActiveWorkspace()
         activateFocusedWindow()
         updateMenuBar()
+        scheduleOffscreenSweep()
         slog("State restored (\(restored)/\(allWindows.count) windows matched, age \(Int(age))s)")
         saveState()
         return true
