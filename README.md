@@ -24,8 +24,6 @@ Inspired by [PaperWM](https://github.com/paperwm/PaperWM) for GNOME. Rebuilt fro
 - **Horizontal Strip** — Windows arranged side by side in a scrollable band. No grid, no floating, no stacking.
 - **9 Workspaces** — `Hyper+1`–`Hyper+9`. Each workspace has its own strip. Off-screen hiding, no SIP required.
 - **Slice Grid** — Your screen is a grid of columns. Window widths snap to integer slice counts. Same apps, different screens, always fitting.
-- **Peek Layout** — Neighbor windows peek at the edges so you always know what's next.
-
 ---
 
 ## The Slice Grid
@@ -108,7 +106,7 @@ Every app gets a default size based on its bundle ID:
 Streifen.app (Menu Bar, LSUIElement)
 ├── WindowTracker        — AX-based window discovery + observer
 ├── WorkspaceManager     — 9 workspaces, off-screen hiding
-├── StripLayout          — Horizontal layout with gaps + peek
+├── StripLayout          — Horizontal layout with gap spacing
 ├── HotkeyManager        — Hyper+key bindings (NSEvent monitor)
 ├── StreifenConfig        — Slice grid, app sizes, behaviors
 ├── DebugServer          — HTTP API on localhost:22222
@@ -149,7 +147,7 @@ HTTP server on `localhost:22222`.
 
 - [x] Window tracking + AX observation
 - [x] Virtual workspaces + hotkeys
-- [x] Strip layout + peek
+- [x] Strip layout
 - [x] Slice grid + app-aware defaults
 - [ ] TOML config + persistence
 - [x] Trackpad gestures (smooth 4-finger pan + snap)
