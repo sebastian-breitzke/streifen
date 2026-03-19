@@ -68,7 +68,6 @@ enum ScreenClass: String, Sendable {
 
 struct StreifenConfig: Sendable {
     var gap: CGFloat
-    var peekWidth: CGFloat
     /// Pinned apps: first window goes to target workspace, additional windows → current workspace
     var pinnedApps: [String: Int]  // bundleId → workspace
 
@@ -89,7 +88,6 @@ struct StreifenConfig: Sendable {
 
     static let `default` = StreifenConfig(
         gap: 10,
-        peekWidth: 60,
         pinnedApps: [
             // Business Communication → WS 1
             "com.microsoft.teams2": 1,

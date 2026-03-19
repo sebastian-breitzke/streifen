@@ -220,7 +220,6 @@ final class DebugServer {
     private func serializeConfig(_ config: StreifenConfig) -> [String: Any] {
         return [
             "gap": config.gap,
-            "peekWidth": config.peekWidth,
             "pinnedApps": config.pinnedApps,
             "followApps": Array(config.followApps),
             "screenClass": ScreenClass.current.rawValue,

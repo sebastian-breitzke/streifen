@@ -333,17 +333,12 @@ final class WorkspaceManager {
         let windowX = metrics[index].x
         let windowWidth = metrics[index].width
 
-        // Peek margins: reserve space for neighbor peek
         let gap = config.gap
-        let peek = config.peekWidth
-        let leftPeek: CGFloat = index > 0 ? peek : 0
-        let rightPeek: CGFloat = index < ws.windows.count - 1 ? peek : 0
-
         let tolerance: CGFloat = 5
         let currentLeft = windowX + ws.scrollOffset
         let currentRight = currentLeft + windowWidth
-        let screenLeft = gap + leftPeek
-        let screenRight = screen.width - gap - rightPeek
+        let screenLeft = gap
+        let screenRight = screen.width - gap
 
         if windowWidth > screenRight - screenLeft {
             // Window wider than available space — align left edge
@@ -614,9 +609,6 @@ final class WorkspaceManager {
 
     private func stripMetrics(for ws: Workspace, screen: CGRect) -> [WindowStripMetrics] {
         let gap = config.gap
-        let peek = config.peekWidth
-        let hasNeighbors = ws.windows.count > 1
-        let maxW = screen.width - (2 * gap) - (2 * peek)
         let sc = ScreenClass.current
 
         var x: CGFloat = gap
@@ -624,9 +616,7 @@ final class WorkspaceManager {
         metrics.reserveCapacity(ws.windows.count)
 
         for window in ws.windows {
-            var width = screen.width * CGFloat(window.sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
-            if hasNeighbors { width = min(width, maxW) }
-            width = max(width, 200)
+            let width = max(screen.width * CGFloat(window.sliceCount) / CGFloat(sc.totalSlices) - (2 * gap), 200)
             metrics.append(WindowStripMetrics(x: x, width: width))
             x += width + gap
         }
