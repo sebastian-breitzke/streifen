@@ -31,6 +31,7 @@ final class WorkspaceManager {
 
     private weak var windowTracker: WindowTracker?
     private var stripLayout: StripLayout?
+    private var lastLayoutTime: CFAbsoluteTime = 0
 
     init(config: StreifenConfig) {
         self.config = config
@@ -211,6 +212,9 @@ final class WorkspaceManager {
 
     /// Snap a manually resized window to the nearest slice count
     func handleManualResize(windowId: CGWindowID) {
+        // Ignore resizes triggered by our own layout (cooldown 500ms)
+        guard CFAbsoluteTimeGetCurrent() - lastLayoutTime > 0.5 else { return }
+
         guard let screen = NSScreen.managed?.visibleFrame else { return }
         let ws = activeWorkspace
         guard let window = ws.windows.first(where: { $0.windowId == windowId }) else { return }
@@ -471,16 +475,11 @@ final class WorkspaceManager {
             return
         }
 
-        // Don't switch workspaces unless explicitly allowed (Cmd+Tab, Dock click).
-        // AX focusedWindowChanged is too noisy — browser popups, autocomplete
-        // dropdowns, and internal window management cause false switches.
-        guard allowWorkspaceSwitch else { return }
-
         // Find which workspace has this window
         guard let (sourceWsId, sourceWs, window) = findWindow(byId: windowId) else { return }
         let bundleId = window.bundleId ?? ""
 
-        // Follow app? Pull to current workspace.
+        // Follow app? Always pull to current workspace, even from AX events.
         if config.followApps.contains(bundleId) {
             sourceWs.windows.removeAll { $0.windowId == windowId }
             ws.windows.append(window)
@@ -489,6 +488,11 @@ final class WorkspaceManager {
             slog("Pulled follow-app \(bundleId) to workspace \(activeWorkspaceId)")
             return
         }
+
+        // Don't switch workspaces unless explicitly allowed (Cmd+Tab, Dock click).
+        // AX focusedWindowChanged is too noisy — browser popups, autocomplete
+        // dropdowns, and internal window management cause false switches.
+        guard allowWorkspaceSwitch else { return }
 
         // Window is on another workspace → switch to that workspace
         if sourceWsId != activeWorkspaceId {
@@ -642,6 +646,7 @@ final class WorkspaceManager {
 
     private func layoutActiveWorkspace() {
         guard let screen = NSScreen.managed?.visibleFrame else { return }
+        lastLayoutTime = CFAbsoluteTimeGetCurrent()
         windowTracker?.beginProgrammaticUpdate()
         stripLayout?.layout(workspace: activeWorkspace, screenFrame: screen, config: config)
         // Delay re-enabling observer to let AX notifications drain
@@ -681,31 +686,21 @@ final class WorkspaceManager {
         }
     }
 
-    /// Activate the focused window and raise others with a slight delay so the
-    /// focused window appears instantly while background windows catch up.
+    /// Activate windows on the active workspace so they render at their AX-set positions.
+    /// Apps like Ghostty ignore AX position changes unless their window is raised.
     private func activateFocusedWindow() {
         let ws = activeWorkspace
         guard ws.focusIndex < ws.windows.count else { return }
 
-        // Activate focused window immediately
+        // Raise all windows — forces each app to render at AX positions
+        for window in ws.windows {
+            try? window.axElement.performAction(.raise)
+        }
+
+        // Activate the focused window's app last so it ends up in front
         let focused = ws.windows[ws.focusIndex]
-        try? focused.axElement.performAction(.raise)
         try? focused.axElement.setAttribute(.main, value: true)
         focused.app.activate()
-
-        // Raise remaining windows async — they're already positioned by layout,
-        // just need a raise to force apps to render at AX-set positions
-        let others = ws.windows.enumerated().filter { $0.offset != ws.focusIndex }.map { $0.element }
-        if !others.isEmpty {
-            DispatchQueue.main.async {
-                for window in others {
-                    try? window.axElement.performAction(.raise)
-                }
-                // Re-raise focused so it stays in front
-                try? focused.axElement.performAction(.raise)
-                focused.app.activate()
-            }
-        }
     }
 
     // MARK: - Reset
