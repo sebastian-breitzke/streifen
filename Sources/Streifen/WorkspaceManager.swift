@@ -692,9 +692,14 @@ final class WorkspaceManager {
         let ws = activeWorkspace
         guard ws.focusIndex < ws.windows.count else { return }
 
-        // Raise all windows — forces each app to render at AX positions
+        // Raise each window and re-confirm its position.
+        // Apps like Ghostty ignore AX position changes on non-raised windows,
+        // so we raise first, then re-apply the cached target position.
         for window in ws.windows {
             try? window.axElement.performAction(.raise)
+            if window.frame.origin.x != offscreenPark.x {
+                try? window.axElement.setAttribute(.position, value: window.frame.origin)
+            }
         }
 
         // Activate the focused window's app last so it ends up in front
