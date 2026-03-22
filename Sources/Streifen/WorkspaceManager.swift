@@ -34,6 +34,7 @@ final class WorkspaceManager {
     private weak var windowTracker: WindowTracker?
     private var stripLayout: StripLayout?
     private var lastLayoutTime: CFAbsoluteTime = 0
+    private var lastSwitchTime: CFAbsoluteTime = 0
 
     init(config: StreifenConfig) {
         self.config = config
@@ -236,6 +237,7 @@ final class WorkspaceManager {
         guard targetId >= 1 && targetId <= 9 else { return }
         guard targetId != activeWorkspaceId else { return }
 
+        lastSwitchTime = CFAbsoluteTimeGetCurrent()
         windowTracker?.beginProgrammaticUpdate()
 
         // Hide current workspace windows off-screen (skip already-parked)
@@ -406,6 +408,11 @@ final class WorkspaceManager {
     // MARK: - App Focus (Cmd+Tab etc.)
 
     func handleAppActivated(_ app: NSRunningApplication) {
+        // Cooldown after programmatic workspace switch — activateFocusedWindow raises
+        // all windows which triggers cascading app activation notifications. Without
+        // this guard, apps with windows on multiple workspaces cause a ping-pong loop.
+        guard CFAbsoluteTimeGetCurrent() - lastSwitchTime > 0.5 else { return }
+
         let pid = app.processIdentifier
         let ws = activeWorkspace
 
