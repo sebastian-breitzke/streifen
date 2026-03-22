@@ -15,10 +15,10 @@ final class Workspace {
     var isVisible: Bool = false
 }
 
-/// Park position for hidden windows — large negative so no screen shows them.
-/// macOS clamps large positive values to the screen edge (partially visible),
-/// but accepts large negative values without clamping.
-let offscreenPark = CGPoint(x: -32000, y: -32000)
+/// Park position for hidden windows — far off-screen.
+/// macOS clamps this to a tiny corner at the bottom-right edge (~40x20px),
+/// well behind raised visible windows.
+let offscreenPark = CGPoint(x: 99999, y: 99999)
 
 @MainActor
 final class WorkspaceManager {
