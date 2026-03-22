@@ -9,7 +9,7 @@ final class TrackedWindow: @unchecked Sendable {
     var virtualX: CGFloat
     var sliceCount: Int
     var appSize: AppSize
-    var category: String?
+
     init(windowId: CGWindowID, axElement: UIElement, app: NSRunningApplication, frame: CGRect, appSize: AppSize) {
         self.windowId = windowId
         self.axElement = axElement
@@ -18,7 +18,6 @@ final class TrackedWindow: @unchecked Sendable {
         self.virtualX = frame.origin.x
         self.appSize = appSize
         self.sliceCount = appSize.slices(for: ScreenClass.current)
-        self.category = nil
     }
 
     var bundleId: String? {

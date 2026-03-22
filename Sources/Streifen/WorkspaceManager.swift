@@ -122,9 +122,8 @@ final class WorkspaceManager {
             }
         }
 
-        layoutActiveWorkspace()
+        layoutActiveWorkspace()  // schedules endProgrammaticUpdate after 50ms
         activateFocusedWindow()
-        windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
 
         // Log assignment details
@@ -197,29 +196,14 @@ final class WorkspaceManager {
         // Re-layout strip
         if added || removed {
             if removed {
-                // After removing a window, clamp scroll offset so no gap appears at the end
                 clampScrollOffset(ws)
-                slog("Window removed — relayout WS \(ws.id), \(ws.windows.count) windows, scroll=\(ws.scrollOffset)")
             }
             if added {
                 ensureWindowVisible(at: ws.focusIndex)
             } else {
                 layoutActiveWorkspace()
             }
-            if removed {
-                // Log positions after layout + activate for debugging
-                for (i, w) in ws.windows.enumerated() {
-                    let axPos: CGPoint? = try? w.axElement.attribute(.position)
-                    slog("  [\(i)] \(w.app.localizedName ?? "?")(\(w.windowId)) cached=(\(Int(w.frame.origin.x)),\(Int(w.frame.origin.y))) ax=(\(axPos.map { "\(Int($0.x)),\(Int($0.y))" } ?? "nil"))")
-                }
-            }
             activateFocusedWindow()
-            if removed {
-                for (i, w) in ws.windows.enumerated() {
-                    let axPos: CGPoint? = try? w.axElement.attribute(.position)
-                    slog("  POST-ACTIVATE [\(i)] \(w.app.localizedName ?? "?")(\(w.windowId)) cached=(\(Int(w.frame.origin.x)),\(Int(w.frame.origin.y))) ax=(\(axPos.map { "\(Int($0.x)),\(Int($0.y))" } ?? "nil"))")
-                }
-            }
             saveState()
         }
 
@@ -623,10 +607,6 @@ final class WorkspaceManager {
 
     // MARK: - Layout
 
-    func layoutCurrentWorkspace() {
-        layoutActiveWorkspace()
-    }
-
     /// Ensure scroll offset doesn't leave empty space at the strip's end
     private func clampScrollOffset(_ ws: Workspace) {
         guard let screen = NSScreen.managed?.visibleFrame, let strip = stripLayout else { return }
@@ -664,7 +644,7 @@ final class WorkspaceManager {
         guard let screen = NSScreen.managed?.visibleFrame else { return }
         lastLayoutTime = CFAbsoluteTimeGetCurrent()
         windowTracker?.beginProgrammaticUpdate()
-        stripLayout?.layout(workspace: activeWorkspace, screenFrame: screen, config: config)
+        stripLayout?.layout(workspace: activeWorkspace, screenFrame: screen)
         // Delay re-enabling observer to let AX notifications drain
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.windowTracker?.endProgrammaticUpdate()
@@ -675,15 +655,19 @@ final class WorkspaceManager {
     /// because some apps (Ghostty, Zen, Teams, Edge) silently ignore AX position
     /// changes when they are not the frontmost app.
     private func scheduleOffscreenSweep() {
+        guard let screen = NSScreen.managed?.visibleFrame else { return }
+        let screenMaxX = screen.maxX
+
         for delay in [0.1, 0.3, 0.8] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self else { return }
                 self.windowTracker?.beginProgrammaticUpdate()
                 for ws in self.workspaces.values where !ws.isVisible {
                     for window in ws.windows {
-                        // Check actual AX position, not just our cached frame
+                        // Check actual AX position — macOS clamps offscreenPark (99999)
+                        // to ~1688, so compare against screen bounds instead
                         let actualPos: CGPoint? = try? window.axElement.attribute(.position)
-                        if let pos = actualPos, pos.x != offscreenPark.x {
+                        if let pos = actualPos, pos.x <= screenMaxX {
                             window.setPosition(offscreenPark)
                         }
                     }
@@ -742,9 +726,8 @@ final class WorkspaceManager {
         ws1.scrollOffset = 0
         ws1.focusIndex = 0
 
-        layoutActiveWorkspace()
+        layoutActiveWorkspace()  // schedules endProgrammaticUpdate after 50ms
         activateFocusedWindow()
-        windowTracker?.endProgrammaticUpdate()
         updateMenuBar()
         slog("Reset — all windows moved to workspace 1")
     }

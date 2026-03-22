@@ -9,7 +9,7 @@ final class StripLayout {
     }
 
     /// Lay out all windows in the workspace horizontally
-    func layout(workspace: Workspace, screenFrame: CGRect, config: StreifenConfig) {
+    func layout(workspace: Workspace, screenFrame: CGRect) {
         let gap = config.gap
         let windows = workspace.windows
         guard !windows.isEmpty else { return }
