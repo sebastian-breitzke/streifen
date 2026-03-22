@@ -15,8 +15,10 @@ final class Workspace {
     var isVisible: Bool = false
 }
 
-/// Park position for hidden windows — far enough that no screen can show them
-let offscreenPark = CGPoint(x: 99999, y: 99999)
+/// Park position for hidden windows — large negative so no screen shows them.
+/// macOS clamps large positive values to the screen edge (partially visible),
+/// but accepts large negative values without clamping.
+let offscreenPark = CGPoint(x: -32000, y: -32000)
 
 @MainActor
 final class WorkspaceManager {
@@ -197,13 +199,27 @@ final class WorkspaceManager {
             if removed {
                 // After removing a window, clamp scroll offset so no gap appears at the end
                 clampScrollOffset(ws)
+                slog("Window removed — relayout WS \(ws.id), \(ws.windows.count) windows, scroll=\(ws.scrollOffset)")
             }
             if added {
                 ensureWindowVisible(at: ws.focusIndex)
             } else {
                 layoutActiveWorkspace()
             }
+            if removed {
+                // Log positions after layout + activate for debugging
+                for (i, w) in ws.windows.enumerated() {
+                    let axPos: CGPoint? = try? w.axElement.attribute(.position)
+                    slog("  [\(i)] \(w.app.localizedName ?? "?")(\(w.windowId)) cached=(\(Int(w.frame.origin.x)),\(Int(w.frame.origin.y))) ax=(\(axPos.map { "\(Int($0.x)),\(Int($0.y))" } ?? "nil"))")
+                }
+            }
             activateFocusedWindow()
+            if removed {
+                for (i, w) in ws.windows.enumerated() {
+                    let axPos: CGPoint? = try? w.axElement.attribute(.position)
+                    slog("  POST-ACTIVATE [\(i)] \(w.app.localizedName ?? "?")(\(w.windowId)) cached=(\(Int(w.frame.origin.x)),\(Int(w.frame.origin.y))) ax=(\(axPos.map { "\(Int($0.x)),\(Int($0.y))" } ?? "nil"))")
+                }
+            }
             saveState()
         }
 

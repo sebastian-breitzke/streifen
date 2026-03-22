@@ -196,6 +196,10 @@ final class DebugServer {
             ],
             "virtualX": round(w.virtualX * 10) / 10,
         ]
+        // Read actual AX position for debugging
+        if let axPos: CGPoint = try? w.axElement.attribute(.position) {
+            dict["axPos"] = ["x": round(axPos.x), "y": round(axPos.y)]
+        }
         // Flag if window appears off-screen
         if let screen {
             let isOffscreen = w.frame.origin.x > screen.maxX || w.frame.maxX < screen.origin.x

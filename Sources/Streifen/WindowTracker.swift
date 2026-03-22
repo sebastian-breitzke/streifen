@@ -158,7 +158,9 @@ final class WindowTracker {
     }
 
     private func handleAXNotification(_ notification: AXNotification, element: UIElement, pid: pid_t) {
-        guard !isUpdating else { return }
+        // Allow destroy notifications even during programmatic updates —
+        // window closures during layout must not be silently dropped.
+        if isUpdating && notification != .uiElementDestroyed { return }
 
         switch notification {
         case .windowCreated:
@@ -269,18 +271,25 @@ final class WindowTracker {
         guard !isUpdating else { return }
         var pruned = false
         for (id, window) in trackedWindows {
-            // Only prune if AX position is unreadable AND the app is no longer running.
-            // Off-screen parked windows (other workspaces) can have stale AX handles
-            // but are still valid — the app is alive, so keep them.
             if (try? window.axElement.attribute(.position) as CGPoint?) == nil {
                 if window.app.isTerminated {
                     slog("Prune dead window \(id): \(window.app.localizedName ?? "?") (app terminated)")
                     trackedWindows.removeValue(forKey: id)
                     pruned = true
                 } else {
-                    // AX handle stale but app alive — try to re-discover
-                    slog("Stale AX handle for \(id): \(window.app.localizedName ?? "?") — re-discovering")
-                    discoverWindows(for: window.app)
+                    // AX handle unreadable but app alive — verify via app's window list.
+                    // Only prune if the app reports OTHER windows but NOT this one.
+                    // If the app reports zero windows (common for background apps),
+                    // don't prune — the app just isn't responding to AX queries.
+                    if let appElement = AXSwift.Application(window.app),
+                       let axWindows = try? appElement.windows() {
+                        let liveIds = Set(axWindows.compactMap { getWindowId(from: $0) })
+                        if !liveIds.isEmpty && !liveIds.contains(id) {
+                            slog("Prune dead window \(id): \(window.app.localizedName ?? "?") (window closed, \(liveIds.count) siblings alive)")
+                            trackedWindows.removeValue(forKey: id)
+                            pruned = true
+                        }
+                    }
                 }
             }
         }

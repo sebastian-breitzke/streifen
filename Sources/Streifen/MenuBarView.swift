@@ -27,6 +27,10 @@ struct MenuBarView: View {
             viewModel.resetAll()
         }
 
+        Button("Restart Streifen") {
+            viewModel.restart()
+        }
+
         Divider()
 
         Button("Quit Streifen") {
@@ -60,6 +64,15 @@ final class MenuBarViewModel: ObservableObject {
 
     func resetAll() {
         NotificationCenter.default.post(name: .resetAllWorkspaces, object: nil)
+    }
+
+    func restart() {
+        let executablePath = Bundle.main.executablePath ?? ProcessInfo.processInfo.arguments[0]
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
+        try? process.run()
+        NSApplication.shared.terminate(nil)
     }
 }
 
