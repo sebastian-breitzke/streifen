@@ -72,13 +72,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func killOtherInstances() {
         let myPid = ProcessInfo.processInfo.processIdentifier
-        let myName = ProcessInfo.processInfo.processName
 
-        // Kill by process name (works for debug builds without bundle ID)
+        // Match by name (case-insensitive) or bundle ID — catches both
+        // dev builds (.build/debug/Streifen) and Homebrew installs (streifen)
         let all = NSWorkspace.shared.runningApplications
         for app in all {
             if app.processIdentifier != myPid,
-               app.localizedName == myName || app.bundleIdentifier == "de.s16e.streifen" {
+               app.localizedName?.lowercased() == "streifen" || app.bundleIdentifier == "de.s16e.streifen" {
                 slog("Killing old instance (pid \(app.processIdentifier))")
                 app.terminate()
             }
