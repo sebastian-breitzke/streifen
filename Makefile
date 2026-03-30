@@ -6,6 +6,7 @@ BUILD_DIR = .build/release
 
 build:
 	swift build -c release
+	codesign --force --sign - --identifier de.s16e.streifen $(BUILD_DIR)/$(BINARY)
 
 install: build
 	install -d $(PREFIX)/bin
