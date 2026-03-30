@@ -66,7 +66,7 @@ enum ScreenClass: String, Sendable {
 
 // MARK: - Config
 
-struct StreifenConfig: Sendable {
+struct StreifenConfig: Sendable, Codable {
     var gap: CGFloat
     /// Pinned apps: first window goes to target workspace, additional windows → current workspace
     var pinnedApps: [String: Int]  // bundleId → workspace
@@ -89,7 +89,37 @@ struct StreifenConfig: Sendable {
         return appSizes[bid] ?? defaultSize
     }
 
-    static let `default` = StreifenConfig(
+    // MARK: - File Persistence
+
+    private static let configURL: URL = {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/streifen", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("config.json")
+    }()
+
+    static func load() -> StreifenConfig {
+        let url = configURL
+        if let data = try? Data(contentsOf: url),
+           let config = try? JSONDecoder().decode(StreifenConfig.self, from: data) {
+            slog("Config loaded from \(url.path)")
+            return config
+        }
+        // First launch or corrupt file — write defaults
+        let config = StreifenConfig.hardcodedDefault
+        config.save()
+        slog("Config written to \(url.path) (defaults)")
+        return config
+    }
+
+    func save() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(self) else { return }
+        try? data.write(to: Self.configURL, options: .atomic)
+    }
+
+    static let hardcodedDefault = StreifenConfig(
         gap: 10,
         pinnedApps: [
             // Business Communication → WS 1

@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         killOtherInstances()
         guard checkAccessibility() else { return }
 
-        let config = StreifenConfig.default
+        let config = StreifenConfig.load()
         windowTracker = WindowTracker(config: config)
         workspaceManager = WorkspaceManager(config: config)
         stripLayout = StripLayout(config: config)
@@ -47,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         windowTracker?.onWindowResized = { [weak self] windowId in
             self?.workspaceManager?.handleManualResize(windowId: windowId)
+        }
+
+        windowTracker?.onWindowMinimizeChanged = { [weak self] windowId, minimized in
+            self?.workspaceManager?.handleWindowMinimizeChanged(windowId: windowId, minimized: minimized)
         }
 
         hotkeyManager?.registerHotkeys()

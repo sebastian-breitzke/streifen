@@ -5,6 +5,7 @@ import AXSwift
 final class Workspace {
     let id: Int
     var windows: [TrackedWindow] = []
+    var minimizedWindows: [TrackedWindow] = []
     var scrollOffset: CGFloat = 0
     var focusIndex: Int = 0
 
@@ -139,9 +140,12 @@ final class WorkspaceManager {
     // MARK: - Window Updates
 
     func handleWindowsUpdate(_ windows: [TrackedWindow]) {
-        let knownIds = Set(workspaces.values.flatMap { $0.windows.map { $0.windowId } })
+        let knownIds = Set(workspaces.values.flatMap {
+            $0.windows.map { $0.windowId } + $0.minimizedWindows.map { $0.windowId }
+        })
         let ws = activeWorkspace
         var added = false
+        var pinnedSwitchTarget: (Int, TrackedWindow)? = nil
 
         // Insert new windows — pinned apps go to their workspace (first window only)
         for window in windows {
@@ -171,9 +175,13 @@ final class WorkspaceManager {
                     ws.focusIndex = insertIdx
                 }
 
-                // If target is not the active workspace, hide
+                // If target is not the active workspace, hide — and check if we should switch
                 if targetWs !== ws {
                     window.setPosition(offscreenPark)
+                    // If the app is currently frontmost, switch to its pinned workspace
+                    if window.app.processIdentifier == NSWorkspace.shared.frontmostApplication?.processIdentifier {
+                        pinnedSwitchTarget = (targetWs.id, window)
+                    }
                 }
 
                 added = true
@@ -186,6 +194,7 @@ final class WorkspaceManager {
         for workspace in workspaces.values {
             let before = workspace.windows.count
             workspace.windows.removeAll { !currentIds.contains($0.windowId) }
+            workspace.minimizedWindows.removeAll { !currentIds.contains($0.windowId) }
             if workspace.windows.count != before { removed = true }
         }
 
@@ -209,6 +218,68 @@ final class WorkspaceManager {
         }
 
         updateMenuBar()
+
+        // Switch to pinned workspace if the frontmost app's first window was just placed there
+        if let (targetWsId, window) = pinnedSwitchTarget {
+            if let targetWs = workspaces[targetWsId],
+               let idx = targetWs.windows.firstIndex(where: { $0.windowId == window.windowId }) {
+                targetWs.focusIndex = idx
+            }
+            switchTo(workspace: targetWsId)
+            slog("Auto-switched to ws\(targetWsId) (pinned app \(window.bundleId ?? "?") activated)")
+        }
+    }
+
+    // MARK: - Minimize Handling
+
+    func handleWindowMinimizeChanged(windowId: CGWindowID, minimized: Bool) {
+        for ws in workspaces.values {
+            if minimized {
+                // Move from windows → minimizedWindows
+                if let idx = ws.windows.firstIndex(where: { $0.windowId == windowId }) {
+                    let window = ws.windows.remove(at: idx)
+                    ws.minimizedWindows.append(window)
+                    slog("Minimized \(window.app.localizedName ?? "?") (\(windowId)) on ws\(ws.id)")
+
+                    if ws.id == activeWorkspaceId {
+                        // Clamp focus index
+                        if ws.focusIndex >= ws.windows.count {
+                            ws.focusIndex = max(0, ws.windows.count - 1)
+                        }
+                        clampScrollOffset(ws)
+                        layoutActiveWorkspace()
+                        if !ws.windows.isEmpty {
+                            activateFocusedWindow()
+                        }
+                        saveState()
+                    }
+                    updateMenuBar()
+                    return
+                }
+            } else {
+                // Move from minimizedWindows → windows
+                if let idx = ws.minimizedWindows.firstIndex(where: { $0.windowId == windowId }) {
+                    let window = ws.minimizedWindows.remove(at: idx)
+                    slog("Unminimized \(window.app.localizedName ?? "?") (\(windowId)) on ws\(ws.id)")
+
+                    if ws.id == activeWorkspaceId {
+                        // Insert near current focus
+                        let insertIdx = min(ws.focusIndex + 1, ws.windows.count)
+                        ws.windows.insert(window, at: insertIdx)
+                        ws.focusIndex = insertIdx
+                        ensureWindowVisible(at: insertIdx)
+                        activateFocusedWindow()
+                    } else {
+                        // Not active workspace — just append and park
+                        ws.windows.append(window)
+                        window.setPosition(offscreenPark)
+                    }
+                    saveState()
+                    updateMenuBar()
+                    return
+                }
+            }
+        }
     }
 
     /// Snap a manually resized window to the nearest slice count
@@ -457,15 +528,17 @@ final class WorkspaceManager {
         // Search other workspaces — switch to the one containing this app's window
         for (wsId, otherWs) in workspaces where wsId != activeWorkspaceId {
             if let window = otherWs.windows.first(where: { $0.app.processIdentifier == pid }) {
-                switchTo(workspace: wsId)
-                if let idx = activeWorkspace.windows.firstIndex(where: { $0.windowId == window.windowId }) {
-                    activeWorkspace.focusIndex = idx
-                    do {
-                        try window.axElement.setAttribute(.main, value: true)
-                        window.app.activate()
-                    } catch {}
-                    ensureWindowVisible(at: idx)
+                // Set focus on target workspace BEFORE switching so switchTo
+                // scrolls to the correct window instead of the old focusIndex
+                if let idx = otherWs.windows.firstIndex(where: { $0.windowId == window.windowId }) {
+                    otherWs.focusIndex = idx
                 }
+                switchTo(workspace: wsId)
+                // Activate the correct window (switchTo already scrolled via focusIndex)
+                do {
+                    try window.axElement.setAttribute(.main, value: true)
+                    window.app.activate()
+                } catch {}
                 slog("Auto-switched to workspace \(wsId) (app activated, fallback)")
                 return
             }
@@ -477,6 +550,16 @@ final class WorkspaceManager {
 
         // Already in active workspace? Just update focus index.
         if let idx = ws.windows.firstIndex(where: { $0.windowId == windowId }) {
+            // When called from AX focusedWindowChanged (not workspace switch),
+            // only accept focus changes from the currently frontmost app.
+            // Prevents stale notifications from deactivating apps from
+            // overriding the scroll position set by handleAppActivated.
+            if !allowWorkspaceSwitch {
+                let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                if ws.windows[idx].app.processIdentifier != frontPid {
+                    return
+                }
+            }
             ws.focusIndex = idx
             ensureWindowVisible(at: idx)
             return
@@ -503,12 +586,12 @@ final class WorkspaceManager {
 
         // Window is on another workspace → switch to that workspace
         if sourceWsId != activeWorkspaceId {
-            switchTo(workspace: sourceWsId)
-            // Update focus index in the target workspace
-            if let idx = activeWorkspace.windows.firstIndex(where: { $0.windowId == windowId }) {
-                activeWorkspace.focusIndex = idx
-                ensureWindowVisible(at: idx)
+            // Set focus on target workspace BEFORE switching so switchTo
+            // scrolls to the correct window immediately
+            if let idx = sourceWs.windows.firstIndex(where: { $0.windowId == windowId }) {
+                sourceWs.focusIndex = idx
             }
+            switchTo(workspace: sourceWsId)
             slog("Auto-switched to workspace \(sourceWsId) (window focus)")
         }
     }
@@ -593,9 +676,71 @@ final class WorkspaceManager {
             }
         }
 
+        config.save()
         OverlayPanel.shared.showAppDefault(size.rawValue.uppercased(), appName: window.app.localizedName ?? "App")
         slog("App default → \(bundleId): \(size.rawValue) (\(count) windows updated)")
         ensureWindowVisible(at: ws.focusIndex)
+    }
+
+    // MARK: - App Info Panel
+
+    func showAppInfo() {
+        let ws = activeWorkspace
+        guard ws.focusIndex < ws.windows.count else { return }
+        let window = ws.windows[ws.focusIndex]
+        guard let bundleId = window.bundleId else { return }
+
+        let currentSize = config.sizeFor(bundleId: bundleId)
+        let pinnedWs = config.pinnedApps[bundleId]
+        let isFollow = config.followApps.contains(bundleId)
+        let isFloating = config.floatingApps.contains(bundleId)
+
+        AppInfoPanel.shared.show(
+            appName: window.app.localizedName ?? "Unknown",
+            bundleId: bundleId,
+            icon: window.app.icon,
+            sliceCount: window.sliceCount,
+            workspace: activeWorkspaceId,
+            currentSize: currentSize,
+            pinnedWorkspace: pinnedWs,
+            isFollow: isFollow,
+            isFloating: isFloating
+        ) { [weak self] size, pinned, follow, floating in
+            self?.updateAppConfig(bundleId: bundleId, size: size, pinnedWs: pinned, follow: follow, floating: floating)
+        }
+    }
+
+    func updateAppConfig(bundleId: String, size: AppSize, pinnedWs: Int?, follow: Bool, floating: Bool) {
+        config.appSizes[bundleId] = size
+
+        if let ws = pinnedWs {
+            config.pinnedApps[bundleId] = ws
+        } else {
+            config.pinnedApps.removeValue(forKey: bundleId)
+        }
+
+        if follow {
+            config.followApps.insert(bundleId)
+        } else {
+            config.followApps.remove(bundleId)
+        }
+
+        if floating {
+            config.floatingApps.insert(bundleId)
+        } else {
+            config.floatingApps.remove(bundleId)
+        }
+
+        // Update all windows of this app
+        for workspace in workspaces.values {
+            for w in workspace.windows where w.bundleId == bundleId {
+                w.applySize(size)
+            }
+        }
+
+        config.save()
+        ensureWindowVisible(at: activeWorkspace.focusIndex)
+        slog("App config updated → \(bundleId): size=\(size.rawValue) pinned=\(pinnedWs.map(String.init) ?? "—") follow=\(follow) floating=\(floating)")
     }
 
     /// Reset all windows in active workspace to their app-default sizes
@@ -724,7 +869,9 @@ final class WorkspaceManager {
         let ws1 = workspaces[1]!
         for ws in workspaces.values where ws !== ws1 {
             ws1.windows.append(contentsOf: ws.windows)
+            ws1.minimizedWindows.append(contentsOf: ws.minimizedWindows)
             ws.windows.removeAll()
+            ws.minimizedWindows.removeAll()
             ws.scrollOffset = 0
         }
 
@@ -761,6 +908,17 @@ final class WorkspaceManager {
                     "title": window.title,
                 ])
             }
+            for window in ws.minimizedWindows {
+                state.append([
+                    "windowId": Int(window.windowId),
+                    "workspace": wsId,
+                    "sliceCount": window.sliceCount,
+                    "appSize": window.appSize.rawValue,
+                    "bundleId": window.bundleId ?? "",
+                    "title": window.title,
+                    "minimized": true,
+                ])
+            }
         }
         let wrapper: [String: Any] = [
             "activeWorkspace": activeWorkspaceId,
@@ -791,17 +949,17 @@ final class WorkspaceManager {
         let scrollOffsets = wrapper["scrollOffsets"] as? [String: Double] ?? [:]
 
         // Build lookups: try windowId first, fallback to bundleId+title
-        var idLookup: [CGWindowID: (Int, Int?)] = [:]  // wsId, sliceCount (nil = recalc from appSize)
-        var keyLookup: [String: (Int, Int?)] = [:]
+        var idLookup: [CGWindowID: (Int, Int?, Bool)] = [:]  // wsId, sliceCount, minimized
+        var keyLookup: [String: (Int, Int?, Bool)] = [:]
         for entry in windowStates {
             guard let wsId = entry["workspace"] as? Int else { continue }
-            // New format: sliceCount (Int). Old format: widthRatio (Float) → ignore, recalc.
             let slices = entry["sliceCount"] as? Int
+            let minimized = entry["minimized"] as? Bool ?? false
             if let wid = entry["windowId"] as? Int {
-                idLookup[CGWindowID(wid)] = (wsId, slices)
+                idLookup[CGWindowID(wid)] = (wsId, slices, minimized)
             }
             if let bid = entry["bundleId"] as? String, let title = entry["title"] as? String {
-                keyLookup["\(bid)|\(title)"] = (wsId, slices)
+                keyLookup["\(bid)|\(title)"] = (wsId, slices, minimized)
             }
         }
 
@@ -809,7 +967,10 @@ final class WorkspaceManager {
 
         // Use passed-in windows (from windowTracker) since workspaces are empty at startup
         let allWindows = currentWindows
-        for ws in workspaces.values { ws.windows.removeAll() }
+        for ws in workspaces.values {
+            ws.windows.removeAll()
+            ws.minimizedWindows.removeAll()
+        }
         let sc = ScreenClass.current
 
         var restored = 0
@@ -821,15 +982,18 @@ final class WorkspaceManager {
             let match = idLookup[window.windowId]
                 ?? keyLookup["\(window.bundleId ?? "")|\(window.title)"]
 
-            if let (wsId, slices) = match {
+            if let (wsId, slices, minimized) = match {
                 if let slices {
                     window.sliceCount = max(1, min(slices, sc.totalSlices))
                 } else {
-                    // Old format — recalculate from appSize
                     window.sliceCount = window.appSize.slices(for: sc)
                 }
                 window.appSize = config.sizeFor(bundleId: window.bundleId)
-                workspaces[wsId]?.windows.append(window)
+                if minimized {
+                    workspaces[wsId]?.minimizedWindows.append(window)
+                } else {
+                    workspaces[wsId]?.windows.append(window)
+                }
                 if wsId != savedActiveWs {
                     window.setPosition(offscreenPark)
                 }

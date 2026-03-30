@@ -7,6 +7,7 @@ final class WindowTracker {
     var onAppActivated: ((NSRunningApplication) -> Void)?
     var onWindowFocused: ((CGWindowID) -> Void)?
     var onWindowResized: ((CGWindowID) -> Void)?
+    var onWindowMinimizeChanged: ((CGWindowID, Bool) -> Void)?
     var config: StreifenConfig
 
     private var trackedWindows: [CGWindowID: TrackedWindow] = [:]
@@ -34,9 +35,11 @@ final class WindowTracker {
         )
 
         // Periodic liveness check — catch windows that disappeared without AX notification
+        // and re-discover windows that were missed (dropped AX notifications, Electron restarts)
         livenessTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.pruneDeadWindows()
+                self?.rediscoverMissingWindows()
             }
         }
     }
@@ -150,6 +153,8 @@ final class WindowTracker {
             try observer.addNotification(.moved, forElement: appElement)
             try observer.addNotification(.resized, forElement: appElement)
             try observer.addNotification(.focusedWindowChanged, forElement: appElement)
+            try observer.addNotification(.windowMiniaturized, forElement: appElement)
+            try observer.addNotification(.windowDeminiaturized, forElement: appElement)
         } catch {
             slog("Observer setup failed for pid \(pid): \(error)")
         }
@@ -210,6 +215,14 @@ final class WindowTracker {
             if let wid = getWindowId(from: element),
                trackedWindows[wid] != nil {
                 onWindowFocused?(wid)
+            }
+        case .windowMiniaturized:
+            if let wid = getWindowId(from: element), trackedWindows[wid] != nil {
+                onWindowMinimizeChanged?(wid, true)
+            }
+        case .windowDeminiaturized:
+            if let wid = getWindowId(from: element), trackedWindows[wid] != nil {
+                onWindowMinimizeChanged?(wid, false)
             }
         case .moved, .resized:
             for (wid, window) in trackedWindows where window.app.processIdentifier == pid {
@@ -294,6 +307,32 @@ final class WindowTracker {
             }
         }
         if pruned { notifyChanged() }
+    }
+
+    // MARK: - Re-Discovery
+
+    /// Re-discover windows for running apps that have no tracked windows.
+    /// Catches cases where AX windowCreated was dropped (during programmatic update,
+    /// Electron app restarts, observer timeout, etc.)
+    private func rediscoverMissingWindows() {
+        guard !isUpdating else { return }
+        let trackedPids = Set(trackedWindows.values.map { $0.app.processIdentifier })
+        let apps = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isTerminated && !trackedPids.contains($0.processIdentifier)
+        }
+        guard !apps.isEmpty else { return }
+
+        var found = false
+        for app in apps {
+            if let bid = app.bundleIdentifier, Self.ignoredBundleIds.contains(bid) { continue }
+            let before = trackedWindows.count
+            discoverWindows(for: app)
+            if trackedWindows.count > before {
+                slog("Re-discovered \(trackedWindows.count - before) window(s) for \(app.localizedName ?? "?")")
+                found = true
+            }
+        }
+        if found { notifyChanged() }
     }
 
     // MARK: - Helpers

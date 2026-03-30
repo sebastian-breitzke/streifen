@@ -172,20 +172,10 @@ final class HotkeyManager {
             }
         }
 
-        // Hyper+Shift+F1-F5: Set app-default size (ascending)
-        let shiftFKeySizes: [(UInt16, AppSize)] = [
-            (122, .xs),  // Shift+F1
-            (120, .s),   // Shift+F2
-            (99,  .m),   // Shift+F3
-            (118, .l),   // Shift+F4
-            (96,  .xl),  // Shift+F5
-        ]
-
-        for (fKey, size) in shiftFKeySizes {
-            if isHyperShift && keyCode == fKey {
-                workspaceManager?.setAppDefaultSize(size)
-                return
-            }
+        // Hyper+Shift+F1: Show app info panel
+        if isHyperShift && keyCode == 122 {
+            workspaceManager?.showAppInfo()
+            return
         }
 
         // Hyper+Shift+Escape: Reset all windows in workspace to app defaults
@@ -194,9 +184,9 @@ final class HotkeyManager {
             return
         }
 
-        // Hyper+Shift+F12: Dump focused window AX properties
+        // Hyper+Shift+F12: Restart Streifen
         if isHyperShift && keyCode == 111 {
-            dumpFocusedWindow()
+            MenuBarViewModel.shared.restart()
             return
         }
     }
@@ -294,7 +284,7 @@ private func isRegisteredHotkey(_ keyCode: UInt16, isHyper: Bool, isHyperShift: 
     if isHyperShift {
         if allNav.contains(keyCode) { return true }
         if keyCode == 123 || keyCode == 124 { return true } // Shift+Left/Right for reorder
-        if fKeyCodes.contains(keyCode) { return true }
+        if keyCode == 122 { return true } // Shift+F1 for app info
         if keyCode == 53 || keyCode == 111 { return true } // Esc, F12
     }
     return false
