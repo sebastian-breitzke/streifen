@@ -67,14 +67,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugServer?.stop()
         // Crash safety: move all windows back on-screen
         workspaceManager?.restoreAllWindowsOnScreen()
+        // Dev mode: re-enable brew service on exit
+        restoreBrewService()
         slog("Shutdown — windows restored")
     }
+
+    private static let serviceLabel = "homebrew.mxcl.streifen"
 
     private func killOtherInstances() {
         let myPid = ProcessInfo.processInfo.processIdentifier
 
-        // Match by name (case-insensitive) or bundle ID — catches both
-        // dev builds (.build/debug/Streifen) and Homebrew installs (streifen)
+        // Dev build: stop brew service via launchctl so keep_alive doesn't restart.
+        // bootout kills the process AND removes the service — wait for it to exit.
+        if isDevBuild {
+            launchctl("bootout", "gui/\(getuid())/\(Self.serviceLabel)")
+            // Wait for the brew process to actually exit
+            for _ in 0..<20 {
+                let others = NSWorkspace.shared.runningApplications.filter {
+                    $0.processIdentifier != myPid &&
+                    ($0.localizedName?.lowercased() == "streifen" || $0.bundleIdentifier == "de.s16e.streifen")
+                }
+                if others.isEmpty { break }
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            slog("Stopped brew service (dev mode)")
+            return
+        }
+
+        // Non-dev: kill other instances by name or bundle ID
         let all = NSWorkspace.shared.runningApplications
         for app in all {
             if app.processIdentifier != myPid,
@@ -83,6 +103,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 app.terminate()
             }
         }
+    }
+
+    private func restoreBrewService() {
+        guard isDevBuild else { return }
+        let plistPath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/Library/LaunchAgents/\(Self.serviceLabel).plist"
+        guard FileManager.default.fileExists(atPath: plistPath) else { return }
+        launchctl("bootstrap", "gui/\(getuid())", plistPath)
+        slog("Re-enabled brew service")
+    }
+
+    private func launchctl(_ args: String...) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        task.arguments = args
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        try? task.run()
+        task.waitUntilExit()
     }
 
     private func checkAccessibility() -> Bool {
