@@ -52,6 +52,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BINARY" "$APP/Contents/MacOS/Streifen"
 cp "$INFO_SRC" "$APP/Contents/Info.plist"
+cp "$ROOT/Sources/Streifen/Resources/AppIcon.icns" "$APP/Contents/Resources/" 2>/dev/null || true
 
 # Patch Info.plist with version
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"

@@ -10,6 +10,23 @@ Inspired by [PaperWM](https://github.com/paperwm/PaperWM) for GNOME. Rebuilt fro
 
 ---
 
+## Install
+
+```bash
+brew tap sebastian-breitzke/tap
+brew install --cask streifen
+```
+
+Grant Accessibility access when prompted (System Settings → Privacy & Security → Accessibility). Permissions persist across updates.
+
+### Update
+
+```bash
+brew upgrade streifen
+```
+
+---
+
 ## How It Works
 
 ```
@@ -24,11 +41,12 @@ Inspired by [PaperWM](https://github.com/paperwm/PaperWM) for GNOME. Rebuilt fro
 - **Horizontal Strip** — Windows arranged side by side in a scrollable band. No grid, no stacking.
 - **9 Workspaces** — `Hyper+1`–`Hyper+9`. Each workspace has its own strip. Off-screen hiding, no SIP required.
 - **Slice Grid** — Your screen is a grid of columns. Window widths snap to integer slice counts. Same apps, different screens, always fitting.
+
 ---
 
 ## The Slice Grid
 
-Every screen has a fixed number of slices based on its aspect ratio. Windows take 1, 2, 3… slices. They compose together like a layout raster.
+Every screen has a fixed number of slices based on its aspect ratio. Windows take 1, 2, 3… slices.
 
 | Screen Class | Slices | Example |
 |-------------|--------|---------|
@@ -58,6 +76,10 @@ Every app gets a default size based on its bundle ID:
 - **Floating** — Not part of the strip. Stays where you put it, always visible, survives workspace switches.
 - **Stay** — Windows stay where you put them. Switch away, they hide. Come back, they reappear.
 
+### Configuration
+
+Config lives at `~/.config/streifen/config.json`. Edit directly or use the App Info Panel (`Hyper+Shift+F1`) to change size, pinned workspace, follow, and floating per app — changes apply immediately and persist.
+
 ---
 
 ## Keyboard Shortcuts
@@ -80,23 +102,23 @@ Every app gets a default size based on its bundle ID:
 | `Hyper + H` or `Hyper + ←` | Focus previous window |
 | `Hyper + L` or `Hyper + →` | Focus next window |
 | `Hyper + Shift + ←/→` | Reorder window in strip |
-| `4-finger pan ←/→` | Smooth-scroll strip, then snap to the centered window |
+| `4-finger pan ←/→` | Smooth-scroll strip, then snap to nearest window |
 
-### Sizing — Slice Grid
+### Sizing
 
 | Shortcut | Action |
 |----------|--------|
 | `Hyper + F1–F8` | Set slice count (1 → 8) |
 | `Hyper + -` or `Hyper + ß` | Step −1 slice |
 | `Hyper + +` or `Hyper + ´` | Step +1 slice |
-| `Hyper + Shift + F1–F5` | Set app default (XS → XL) |
 | `Hyper + Shift + Esc` | Reset all windows to defaults |
 
-### Debug
+### App Info & System
 
 | Shortcut | Action |
 |----------|--------|
-| `Hyper + Shift + F12` | Dump AX properties of focused window |
+| `Hyper + Shift + F1` | App Info Panel — change size, pin, follow, float |
+| `Hyper + Shift + F12` | Restart Streifen |
 
 ---
 
@@ -105,10 +127,11 @@ Every app gets a default size based on its bundle ID:
 ```
 Streifen.app (Menu Bar, LSUIElement)
 ├── WindowTracker        — AX-based window discovery + observer
-├── WorkspaceManager     — 9 workspaces, off-screen hiding
+├── WorkspaceManager     — 9 workspaces, off-screen hiding, minimize tracking
 ├── StripLayout          — Horizontal layout with gap spacing
-├── HotkeyManager        — Hyper+key bindings (NSEvent monitor)
-├── StreifenConfig        — Slice grid, app sizes, behaviors
+├── HotkeyManager        — Hyper+key bindings (CGEvent tap)
+├── AppInfoPanel         — Interactive panel for per-app config
+├── StreifenConfig        — JSON config file, load/save
 ├── DebugServer          — HTTP API on localhost:22222
 └── MenuBarView          — SwiftUI MenuBarExtra
 ```
@@ -130,28 +153,48 @@ HTTP server on `localhost:22222`.
 
 - macOS 14+
 - Accessibility permission
-- Input Monitoring permission
 - No SIP disable required
 
 ## Tech Stack
 
 - **Swift 6** + SwiftUI (MenuBarExtra)
 - **AXSwift** — Type-safe Accessibility API
-- **HotKey** — Global keyboard shortcuts
-- **MultitouchSupport** — Raw trackpad input for smooth 4-finger strip navigation
-- **TOMLKit** — Config parsing (prepared)
+- **MultitouchSupport** — Raw trackpad input for 4-finger strip navigation
+- Signed with Developer ID, Apple-notarized
 
 ---
 
-## Roadmap
+## Development
 
-- [x] Window tracking + AX observation
-- [x] Virtual workspaces + hotkeys
-- [x] Strip layout
-- [x] Slice grid + app-aware defaults
-- [ ] TOML config + persistence
-- [x] Trackpad gestures (smooth 4-finger pan + snap)
-- [ ] Multi-monitor support
+```bash
+# Debug build
+swift build
+
+# Run dev build (stops brew service automatically, restores on exit)
+.build/debug/Streifen
+
+# Build signed .app
+./scripts/build-app.sh
+
+# Full release (notarize + DMG)
+APPLE_ID=$(hort --secret apple-id) \
+APPLE_TEAM_ID=N73TK4MNFF \
+APPLE_APP_SPECIFIC_PASSWORD=$(hort --secret apple-app-specific-password) \
+./scripts/build-app.sh 0.2.0 --notarize --dmg
+```
+
+Dev builds show an orange dot on the menu bar icon.
+
+### Release
+
+Push a tag to trigger the CI pipeline:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+GitHub Actions builds, signs, notarizes, creates a GitHub Release with DMG, and updates the Homebrew Cask automatically.
 
 ---
 
