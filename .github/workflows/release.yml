@@ -118,7 +118,8 @@ jobs:
           rm -f Formula/streifen.rb
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A Casks/streifen.rb Formula/streifen.rb
+          git add -A Casks/streifen.rb
+          [ -e Formula/streifen.rb ] && git add -A Formula/streifen.rb || true
           git diff --cached --quiet && exit 0
           git commit -m "Update streifen to ${VERSION}"
           git push origin HEAD:main
