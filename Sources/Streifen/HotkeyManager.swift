@@ -20,7 +20,7 @@ final class HotkeyManager {
         let refcon = Unmanaged.passUnretained(self).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
+            tap: .cgAnnotatedSessionEventTap,
             place: CGEventTapPlacement(rawValue: 0)!,
             options: .defaultTap,
             eventsOfInterest: CGEventMask(eventMask),
