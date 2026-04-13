@@ -389,14 +389,18 @@ final class WorkspaceManager {
     func focusLeft() {
         let ws = activeWorkspace
         guard !ws.windows.isEmpty else { return }
-        ws.focusIndex = max(0, ws.focusIndex - 1)
+        let newIdx = max(0, ws.focusIndex - 1)
+        guard newIdx != ws.focusIndex else { return }  // hard stop at left edge
+        ws.focusIndex = newIdx
         focusCurrentWindow()
     }
 
     func focusRight() {
         let ws = activeWorkspace
         guard !ws.windows.isEmpty else { return }
-        ws.focusIndex = min(ws.windows.count - 1, ws.focusIndex + 1)
+        let newIdx = min(ws.windows.count - 1, ws.focusIndex + 1)
+        guard newIdx != ws.focusIndex else { return }  // hard stop at right edge
+        ws.focusIndex = newIdx
         focusCurrentWindow()
     }
 

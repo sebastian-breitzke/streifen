@@ -2,11 +2,12 @@ import Cocoa
 import SwiftUI
 
 @MainActor
-final class AppInfoPanel {
+final class AppInfoPanel: NSObject, NSWindowDelegate {
     static let shared = AppInfoPanel()
 
     private var panel: NSPanel?
-    private var monitor: Any?
+    private var localMonitor: Any?
+    private var globalMonitor: Any?
 
     typealias ChangeHandler = (AppSize, Int?, Bool, Bool) -> Void
 
@@ -36,18 +37,17 @@ final class AppInfoPanel {
             isFloating: isFloating,
             onChange: onChange
         )
+        viewModel.onDismiss = { [weak self] in self?.dismiss() }
 
         let view = NSHostingView(rootView: AppInfoView(viewModel: viewModel))
         let contentSize = NSSize(width: 320, height: 340)
 
         let p = NSPanel(
             contentRect: NSRect(origin: .zero, size: contentSize),
-            styleMask: [.titled, .closable, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        p.titlebarAppearsTransparent = true
-        p.titleVisibility = .hidden
         p.isMovableByWindowBackground = true
         p.level = .floating
         p.collectionBehavior = [.canJoinAllSpaces, .stationary]
@@ -69,39 +69,31 @@ final class AppInfoPanel {
 
         panel = p
 
-        // Dismiss on click outside or Escape
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
-            guard let self, let panel = self.panel else { return event }
-
-            if event.type == .keyDown {
-                // Escape
-                if event.keyCode == 53 {
-                    self.dismiss()
-                    return nil
-                }
-                // Any Hyper combo — dismiss and pass through
-                let flags = event.modifierFlags.intersection([.control, .option, .command])
-                if flags == [.control, .option, .command] {
-                    self.dismiss()
-                    return event
-                }
+        // Dismiss on Escape or Hyper combo (local — events sent to our app)
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 {
+                self?.dismiss()
+                return nil
             }
-
-            if event.type == .leftMouseDown || event.type == .rightMouseDown {
-                if event.window != panel {
-                    self.dismiss()
-                }
+            let flags = event.modifierFlags.intersection([.control, .option, .command])
+            if flags == [.control, .option, .command] {
+                self?.dismiss()
+                return event
             }
-
             return event
+        }
+
+        // Dismiss on click anywhere outside panel (global — events sent to other apps)
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.dismiss()
         }
     }
 
     func dismiss() {
-        if let monitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        monitor = nil
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        localMonitor = nil
+        globalMonitor = nil
         panel?.orderOut(nil)
         panel = nil
     }
@@ -123,6 +115,7 @@ final class AppInfoViewModel: ObservableObject {
     @Published var isFloating: Bool
 
     private let onChange: AppInfoPanel.ChangeHandler
+    var onDismiss: (() -> Void)?
 
     init(
         appName: String,
@@ -183,6 +176,14 @@ private struct AppInfoView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button {
+                    viewModel.onDismiss?()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             }
 
             Divider()

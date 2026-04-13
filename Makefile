@@ -1,19 +1,14 @@
-PREFIX ?= /usr/local
-BINARY = Streifen
-BUILD_DIR = .build/release
+.PHONY: app release clean
 
-.PHONY: build install uninstall clean
+# Build a signed .app bundle in dist/
+app:
+	./scripts/build-app.sh
 
-build:
-	swift build -c release
-	codesign --force --sign - --identifier de.s16e.streifen $(BUILD_DIR)/$(BINARY)
-
-install: build
-	install -d $(PREFIX)/bin
-	install -m 755 $(BUILD_DIR)/$(BINARY) $(PREFIX)/bin/streifen
-
-uninstall:
-	rm -f $(PREFIX)/bin/streifen
+# Full release: build + sign + notarize + DMG
+# Usage: make release VERSION=0.2.0
+release:
+	./scripts/build-app.sh "$(VERSION)" --notarize --dmg
 
 clean:
 	swift package clean
+	rm -rf dist/

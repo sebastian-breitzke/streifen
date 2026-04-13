@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version (without v-prefix)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      sha256: ${{ steps.dmg.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: vars
+        run: |
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Import signing certificate
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$CSC_LINK" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" \
+            -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | xargs)
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build, sign, notarize, DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          ./scripts/build-app.sh "${{ steps.vars.outputs.version }}" --notarize --dmg
+
+      - id: dmg
+        run: |
+          DMG="dist/Streifen-${{ steps.vars.outputs.version }}-arm64.dmg"
+          SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.vars.outputs.version }}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              "dist/Streifen-${{ steps.vars.outputs.version }}-arm64.dmg" \
+              --title "Streifen ${{ steps.vars.outputs.version }}" \
+              --generate-notes
+          else
+            gh release upload "$TAG" \
+              "dist/Streifen-${{ steps.vars.outputs.version }}-arm64.dmg" --clobber
+          fi
+
+  update-cask:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: sebastian-breitzke/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      - name: Render and commit cask
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          mkdir -p Casks
+          cat > Casks/streifen.rb <<EOF
+          cask "streifen" do
+            version "${VERSION}"
+            sha256 "${SHA256}"
+
+            url "https://github.com/sebastian-breitzke/streifen/releases/download/v#{version}/Streifen-#{version}-arm64.dmg"
+            name "Streifen"
+            desc "Tiling strip window manager for macOS"
+            homepage "https://github.com/sebastian-breitzke/streifen"
+
+            depends_on macos: ">= :sonoma"
+            depends_on arch: :arm64
+
+            app "Streifen.app"
+
+            zap trash: [
+              "~/.config/streifen",
+              "~/Library/Application Support/Streifen",
+            ]
+          end
+          EOF
+          rm -f Formula/streifen.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A Casks/streifen.rb Formula/streifen.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "Update streifen to ${VERSION}"
+          git push origin HEAD:main
