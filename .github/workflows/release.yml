@@ -85,7 +85,7 @@ jobs:
       - name: Checkout homebrew-tap
         uses: actions/checkout@v4
         with:
-          repository: sebastian-breitzke/homebrew-tap
+          repository: sebastian-breitzke/tap
           token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
       - name: Render and commit cask
