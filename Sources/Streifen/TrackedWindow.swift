@@ -9,6 +9,10 @@ final class TrackedWindow: @unchecked Sendable {
     var virtualX: CGFloat
     var sliceCount: Int
     var appSize: AppSize
+    /// Minimum slice count this window can actually shrink to.
+    /// Bumped by StripLayout when an app refuses AX resize below the target width
+    /// (WhatsApp, Teams, etc. enforce an internal minimum width).
+    var minSliceCount: Int = 1
 
     init(windowId: CGWindowID, axElement: UIElement, app: NSRunningApplication, frame: CGRect, appSize: AppSize) {
         self.windowId = windowId
@@ -54,12 +58,13 @@ final class TrackedWindow: @unchecked Sendable {
     /// Update size and recalculate slices for current screen
     func applySize(_ size: AppSize) {
         appSize = size
-        sliceCount = size.slices(for: ScreenClass.current)
+        let sc = ScreenClass.current
+        sliceCount = max(minSliceCount, min(size.slices(for: sc), sc.totalSlices))
     }
 
-    /// Set slice count directly, clamped to screen limits
+    /// Set slice count directly, clamped to screen limits and the window's minimum.
     func setSliceCount(_ count: Int) {
         let sc = ScreenClass.current
-        sliceCount = max(1, min(count, sc.totalSlices))
+        sliceCount = max(minSliceCount, min(count, sc.totalSlices))
     }
 }

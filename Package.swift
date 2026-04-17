@@ -25,10 +25,6 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("Cocoa"),
                 .linkedFramework("Carbon"),
-                .unsafeFlags([
-                    "-F", "/System/Library/PrivateFrameworks",
-                    "-framework", "MultitouchSupport",
-                ]),
             ]
         ),
     ]

@@ -5,7 +5,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowTracker: WindowTracker?
     private var workspaceManager: WorkspaceManager?
     private var hotkeyManager: HotkeyManager?
-    private var trackpadGestureManager: TrackpadGestureManager?
     private var stripLayout: StripLayout?
     private var debugServer: DebugServer?
 
@@ -18,7 +17,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         workspaceManager = WorkspaceManager(config: config)
         stripLayout = StripLayout(config: config)
         hotkeyManager = HotkeyManager(workspaceManager: workspaceManager!, stripLayout: stripLayout!)
-        trackpadGestureManager = TrackpadGestureManager(workspaceManager: workspaceManager!)
 
         // Wire up cross-references
         workspaceManager!.setWindowTracker(windowTracker!)
@@ -54,7 +52,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         hotkeyManager?.registerHotkeys()
-        trackpadGestureManager?.start()
 
         debugServer = DebugServer(workspaceManager: workspaceManager!)
         debugServer?.start()
@@ -63,7 +60,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        trackpadGestureManager?.stop()
         debugServer?.stop()
         // Crash safety: move all windows back on-screen
         workspaceManager?.restoreAllWindowsOnScreen()

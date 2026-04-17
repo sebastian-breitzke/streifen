@@ -64,6 +64,19 @@ enum ScreenClass: String, Sendable {
     }
 }
 
+// MARK: - Activation Behavior
+
+/// Per-app policy for `handleAppActivated`:
+/// - `switchToExisting` (default): if no local window on the active workspace,
+///   switch to the workspace that already contains one.
+/// - `spawnLocalIfMissing`: attempt to create a new local window via AppleScript
+///   on the active workspace instead of switching. Falls back to `switchToExisting`
+///   if the spawn is unsupported, denied, or times out.
+enum ActivateBehavior: String, Sendable, Codable {
+    case switchToExisting
+    case spawnLocalIfMissing
+}
+
 // MARK: - Config
 
 struct StreifenConfig: Sendable, Codable {
@@ -83,10 +96,54 @@ struct StreifenConfig: Sendable, Codable {
     /// Default size for unknown apps
     var defaultSize: AppSize
 
+    /// Per-app activation behavior. Missing entries default to `switchToExisting`.
+    var activateBehaviors: [String: ActivateBehavior] = [:]
+
     /// Resolve size for a bundle ID
     func sizeFor(bundleId: String?) -> AppSize {
         guard let bid = bundleId else { return defaultSize }
         return appSizes[bid] ?? defaultSize
+    }
+
+    /// Resolve activation behavior for a bundle ID.
+    func activateBehavior(for bundleId: String) -> ActivateBehavior {
+        activateBehaviors[bundleId] ?? .switchToExisting
+    }
+
+    // MARK: - Codable
+
+    private enum CodingKeys: String, CodingKey {
+        case gap, pinnedApps, followApps, floatingApps, appSizes, defaultSize, activateBehaviors
+    }
+
+    init(
+        gap: CGFloat,
+        pinnedApps: [String: Int],
+        followApps: Set<String>,
+        floatingApps: Set<String>,
+        appSizes: [String: AppSize],
+        defaultSize: AppSize,
+        activateBehaviors: [String: ActivateBehavior] = [:]
+    ) {
+        self.gap = gap
+        self.pinnedApps = pinnedApps
+        self.followApps = followApps
+        self.floatingApps = floatingApps
+        self.appSizes = appSizes
+        self.defaultSize = defaultSize
+        self.activateBehaviors = activateBehaviors
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        gap = try c.decode(CGFloat.self, forKey: .gap)
+        pinnedApps = try c.decode([String: Int].self, forKey: .pinnedApps)
+        followApps = try c.decode(Set<String>.self, forKey: .followApps)
+        floatingApps = try c.decode(Set<String>.self, forKey: .floatingApps)
+        appSizes = try c.decode([String: AppSize].self, forKey: .appSizes)
+        defaultSize = try c.decode(AppSize.self, forKey: .defaultSize)
+        // Backward-compatible: older config.json files have no activateBehaviors key.
+        activateBehaviors = try c.decodeIfPresent([String: ActivateBehavior].self, forKey: .activateBehaviors) ?? [:]
     }
 
     // MARK: - File Persistence
@@ -177,6 +234,20 @@ struct StreifenConfig: Sendable, Codable {
             "com.apple.finder": .s,
             "com.spotify.client": .s,
         ],
-        defaultSize: .l
+        defaultSize: .l,
+        activateBehaviors: [
+            // Browsers — spawn a new local window instead of teleporting to the
+            // workspace that already has one.
+            "com.apple.Safari":        .spawnLocalIfMissing,
+            "com.google.Chrome":       .spawnLocalIfMissing,
+            "com.microsoft.edgemac":   .spawnLocalIfMissing,
+            "org.mozilla.firefox":     .spawnLocalIfMissing,
+            "app.zen-browser.zen":     .spawnLocalIfMissing,
+            // Terminals
+            "com.apple.Terminal":      .spawnLocalIfMissing,
+            "com.googlecode.iterm2":   .spawnLocalIfMissing,
+            "com.mitchellh.ghostty":   .spawnLocalIfMissing,
+            "dev.warp.Warp-Stable":    .spawnLocalIfMissing,
+        ]
     )
 }

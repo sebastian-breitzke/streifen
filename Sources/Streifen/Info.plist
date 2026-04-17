@@ -26,6 +26,8 @@
     <true/>
     <key>NSAccessibilityUsageDescription</key>
     <string>Streifen needs accessibility access to manage window positions.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Streifen uses Apple Events to create new browser and terminal windows on the current workspace when you activate those apps.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
