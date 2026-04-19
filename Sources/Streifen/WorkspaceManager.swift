@@ -37,12 +37,6 @@ final class WorkspaceManager {
     private var lastLayoutTime: CFAbsoluteTime = 0
     private var lastSwitchTime: CFAbsoluteTime = 0
 
-    /// In-flight spawn attempts — bundleId → deadline (CFAbsoluteTime).
-    /// Cleared when the matching new window appears in `handleWindowsUpdate`,
-    /// or by the timeout handler which then triggers a switch-to-existing fallback.
-    private var pendingSpawns: [String: CFAbsoluteTime] = [:]
-    private let spawnTimeout: CFAbsoluteTime = 1.5
-
     init(config: StreifenConfig) {
         self.config = config
         for i in 1...9 {
@@ -160,12 +154,6 @@ final class WorkspaceManager {
         for window in windows {
             if !knownIds.contains(window.windowId) {
                 let bundleId = window.bundleId ?? ""
-
-                // A pending spawn for this bundleId just produced a window —
-                // clear the entry so the timeout handler doesn't trigger a fallback.
-                if !bundleId.isEmpty, pendingSpawns.removeValue(forKey: bundleId) != nil {
-                    slog("spawn: fulfilled \(bundleId) by window \(window.windowId)")
-                }
 
                 // Floating apps — not managed
                 if config.floatingApps.contains(bundleId) { continue }
@@ -510,23 +498,6 @@ final class WorkspaceManager {
         // AX's focusedWindow might report a window from another workspace (stale focus).
         let localWindow = ws.windows.first(where: { $0.app.processIdentifier == pid })
 
-        // If no local window and the app is configured to spawn one, try that
-        // before any workspace switch. On success the new window will land on
-        // the active workspace through `handleWindowsUpdate` (which already
-        // routes new non-pinned windows there).
-        if localWindow == nil, let bundleId = app.bundleIdentifier {
-            let behavior = config.activateBehavior(for: bundleId)
-            if behavior == .spawnLocalIfMissing, LocalWindowSpawner.isSupported(bundleId: bundleId) {
-                slog("activation: spawn attempt \(bundleId)")
-                if LocalWindowSpawner.spawnNewWindow(bundleId: bundleId) {
-                    pendingSpawns[bundleId] = CFAbsoluteTimeGetCurrent() + spawnTimeout
-                    scheduleSpawnTimeout(bundleId: bundleId)
-                    return
-                }
-                slog("activation: spawn failed \(bundleId) — falling back to switch")
-            }
-        }
-
         // Try to find focused window via AX
         if let appElement = AXSwift.Application(forProcessID: pid),
            let focusedWindow: UIElement = try? appElement.attribute(.focusedWindow),
@@ -588,22 +559,6 @@ final class WorkspaceManager {
         return false
     }
 
-    /// Schedule a fallback if the expected spawn window does not appear in time.
-    private func scheduleSpawnTimeout(bundleId: String) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + spawnTimeout + 0.1) { [weak self] in
-            guard let self else { return }
-            // If `handleWindowsUpdate` already saw the new window it will have
-            // removed this entry. Anything still here is a real timeout.
-            guard self.pendingSpawns.removeValue(forKey: bundleId) != nil else { return }
-            slog("spawn: timeout \(bundleId) — switching to existing window")
-            // Look up any running app with this bundleId; prefer the one the
-            // user activated (frontmost), but any instance works for the lookup
-            // by pid because WorkspaceManager tracks pid on each window.
-            let matching = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first
-            guard let pid = matching?.processIdentifier else { return }
-            _ = self.switchToWorkspaceContaining(pid: pid, reason: "spawn timeout \(bundleId)")
-        }
-    }
 
     func handleWindowFocused(windowId: CGWindowID, allowWorkspaceSwitch: Bool = true) {
         let ws = activeWorkspace
