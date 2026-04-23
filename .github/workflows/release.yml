@@ -109,6 +109,10 @@ jobs:
 
             app "Streifen.app"
 
+            postflight do
+              system_command "xattr", args: ["-rd", "com.apple.quarantine", "#{appdir}/Streifen.app"]
+            end
+
             zap trash: [
               "~/.config/streifen",
               "~/Library/Application Support/Streifen",

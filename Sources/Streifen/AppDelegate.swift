@@ -1,17 +1,34 @@
 import Cocoa
 import AXSwift
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowTracker: WindowTracker?
     private var workspaceManager: WorkspaceManager?
     private var hotkeyManager: HotkeyManager?
     private var stripLayout: StripLayout?
     private var debugServer: DebugServer?
+    private var accessibilityTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         killOtherInstances()
-        guard checkAccessibility() else { return }
 
+        if UIElement.isProcessTrusted(withPrompt: true) {
+            startEngine()
+        } else {
+            slog("lifecycle", "waiting_for_accessibility")
+            accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
+                guard UIElement.isProcessTrusted(withPrompt: false) else { return }
+                timer.invalidate()
+                DispatchQueue.main.async {
+                    self?.accessibilityTimer = nil
+                    self?.startEngine()
+                }
+            }
+        }
+    }
+
+    private func startEngine() {
+        slog("lifecycle", "accessibility_granted")
         let config = StreifenConfig.load()
         windowTracker = WindowTracker(config: config)
         workspaceManager = WorkspaceManager(config: config)
@@ -119,11 +136,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         task.waitUntilExit()
     }
 
-    private func checkAccessibility() -> Bool {
-        let trusted = UIElement.isProcessTrusted(withPrompt: true)
-        if !trusted {
-            slog("error", "accessibility_missing")
-        }
-        return trusted
-    }
 }
