@@ -129,6 +129,23 @@ final class WindowTracker {
                 frame: frame,
                 appSize: appSize
             )
+
+            // Apply persisted minimum width so first layout allocates enough slices
+            if let screen = NSScreen.managed?.visibleFrame {
+                let sc = ScreenClass.current
+                let persistedMin = config.minSlicesFor(
+                    bundleId: app.bundleIdentifier,
+                    screenWidth: screen.width, gap: config.gap,
+                    totalSlices: sc.totalSlices
+                )
+                if persistedMin > 1 {
+                    tracked.minSliceCount = persistedMin
+                    if tracked.sliceCount < persistedMin {
+                        tracked.sliceCount = persistedMin
+                    }
+                }
+            }
+
             trackedWindows[windowId] = tracked
         }
 
@@ -163,9 +180,10 @@ final class WindowTracker {
     }
 
     private func handleAXNotification(_ notification: AXNotification, element: UIElement, pid: pid_t) {
-        // Allow destroy notifications even during programmatic updates —
-        // window closures during layout must not be silently dropped.
-        if isUpdating && notification != .uiElementDestroyed { return }
+        // Allow create and destroy notifications even during programmatic updates —
+        // window closures during layout must not be silently dropped, and new windows
+        // must not be lost just because a layout pass is in progress.
+        if isUpdating && notification != .uiElementDestroyed && notification != .windowCreated { return }
 
         switch notification {
         case .windowCreated:
@@ -280,6 +298,10 @@ final class WindowTracker {
 
     /// Remove tracked windows whose AX element is no longer readable.
     /// Catches cases where AX destroy notifications are missed (Teams screen sharing, etc.)
+    /// Windows get a staleness counter — after maxStaleChecks consecutive failures (30s),
+    /// they are force-pruned even if the app returns an empty window list.
+    private static let maxStaleChecks = 15  // 15 × 2s timer = 30 seconds
+
     private func pruneDeadWindows() {
         guard !isUpdating else { return }
         var pruned = false
@@ -289,20 +311,37 @@ final class WindowTracker {
                     slog("Prune dead window \(id): \(window.app.localizedName ?? "?") (app terminated)")
                     trackedWindows.removeValue(forKey: id)
                     pruned = true
-                } else {
-                    // AX handle unreadable but app alive — verify via app's window list.
-                    // Only prune if the app reports OTHER windows but NOT this one.
-                    // If the app reports zero windows (common for background apps),
-                    // don't prune — the app just isn't responding to AX queries.
-                    if let appElement = AXSwift.Application(window.app),
-                       let axWindows = try? appElement.windows() {
-                        let liveIds = Set(axWindows.compactMap { getWindowId(from: $0) })
-                        if !liveIds.isEmpty && !liveIds.contains(id) {
-                            slog("Prune dead window \(id): \(window.app.localizedName ?? "?") (window closed, \(liveIds.count) siblings alive)")
-                            trackedWindows.removeValue(forKey: id)
-                            pruned = true
-                        }
+                    continue
+                }
+
+                window.staleCount += 1
+
+                // Try to verify via app's window list
+                if let appElement = AXSwift.Application(window.app),
+                   let axWindows = try? appElement.windows() {
+                    let liveIds = Set(axWindows.compactMap { getWindowId(from: $0) })
+                    if !liveIds.isEmpty && !liveIds.contains(id) {
+                        slog("Prune dead window \(id): \(window.app.localizedName ?? "?") (window closed, \(liveIds.count) siblings alive)")
+                        trackedWindows.removeValue(forKey: id)
+                        pruned = true
+                        continue
                     }
+                    // App returned empty list or window still in list — log periodically
+                    if window.staleCount == 3 || window.staleCount % 10 == 0 {
+                        slog("Stale window \(id): \(window.app.localizedName ?? "?") — AX unreadable, app reports \(liveIds.count) windows (attempt \(window.staleCount)/\(Self.maxStaleChecks))")
+                    }
+                }
+
+                // Force-prune after max attempts
+                if window.staleCount >= Self.maxStaleChecks {
+                    slog("Force-prune zombie \(id): \(window.app.localizedName ?? "?") (unreadable for \(window.staleCount) checks)")
+                    trackedWindows.removeValue(forKey: id)
+                    pruned = true
+                }
+            } else {
+                // Position readable — reset stale counter
+                if window.staleCount > 0 {
+                    window.staleCount = 0
                 }
             }
         }
@@ -311,28 +350,27 @@ final class WindowTracker {
 
     // MARK: - Re-Discovery
 
-    /// Re-discover windows for running apps that have no tracked windows.
-    /// Catches cases where AX windowCreated was dropped (during programmatic update,
-    /// Electron app restarts, observer timeout, etc.)
+    /// Re-discover windows for all running apps — catches windows that were missed
+    /// because AX windowCreated was dropped, Electron app restarted, or a new window
+    /// was opened in an app that already had some windows tracked.
     private func rediscoverMissingWindows() {
         guard !isUpdating else { return }
-        let trackedPids = Set(trackedWindows.values.map { $0.app.processIdentifier })
         let apps = NSWorkspace.shared.runningApplications.filter {
-            $0.activationPolicy == .regular && !$0.isTerminated && !trackedPids.contains($0.processIdentifier)
+            $0.activationPolicy == .regular && !$0.isTerminated
         }
-        guard !apps.isEmpty else { return }
 
-        var found = false
+        var totalFound = 0
         for app in apps {
             if let bid = app.bundleIdentifier, Self.ignoredBundleIds.contains(bid) { continue }
             let before = trackedWindows.count
             discoverWindows(for: app)
-            if trackedWindows.count > before {
-                slog("Re-discovered \(trackedWindows.count - before) window(s) for \(app.localizedName ?? "?")")
-                found = true
+            let added = trackedWindows.count - before
+            if added > 0 {
+                slog("Re-discovered \(added) window(s) for \(app.localizedName ?? "?")")
+                totalFound += added
             }
         }
-        if found { notifyChanged() }
+        if totalFound > 0 { notifyChanged() }
     }
 
     // MARK: - Helpers

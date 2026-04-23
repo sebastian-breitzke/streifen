@@ -53,6 +53,36 @@ final class HotkeyManager {
     // MARK: - Event Handling (dispatched from CGEvent tap callback)
 
     fileprivate func handleHotkey(keyCode: UInt16, isHyper: Bool, isHyperShift: Bool) {
+        let action = resolveAction(keyCode: keyCode, isHyper: isHyper, isHyperShift: isHyperShift)
+        slog("Hotkey: \(action) (key=\(keyCode) \(isHyperShift ? "hyper+shift" : "hyper"))")
+        dispatchAction(action, keyCode: keyCode, isHyper: isHyper, isHyperShift: isHyperShift)
+    }
+
+    private func resolveAction(keyCode: UInt16, isHyper: Bool, isHyperShift: Bool) -> String {
+        let numberCodes: [UInt16: Int] = [18:1, 19:2, 20:3, 21:4, 23:5, 22:6, 26:7, 28:8, 25:9]
+        let padCodes: [UInt16: Int] = [83:1, 84:2, 85:3, 86:4, 87:5, 88:6, 89:7, 91:8, 92:9]
+        let fKeySlices: [UInt16: Int] = [122:1, 120:2, 99:3, 118:4, 96:5, 97:6, 98:7, 100:8]
+
+        if isHyper, let ws = numberCodes[keyCode] ?? padCodes[keyCode] { return "switchWs(\(ws))" }
+        if isHyperShift, let ws = numberCodes[keyCode] ?? padCodes[keyCode] { return "moveToWs(\(ws))" }
+        if isHyper && (keyCode == 4 || keyCode == 123) { return "focusLeft" }
+        if isHyper && (keyCode == 37 || keyCode == 124) { return "focusRight" }
+        if isHyper && (keyCode == 27 || keyCode == 44 || keyCode == 78) { return "slice-1" }
+        if isHyper && (keyCode == 24 || keyCode == 30 || keyCode == 69) { return "slice+1" }
+        if isHyperShift && keyCode == 123 { return "reorderLeft" }
+        if isHyperShift && keyCode == 124 { return "reorderRight" }
+        if isHyper && keyCode == 126 { return "switchNext" }
+        if isHyper && keyCode == 125 { return "switchPrev" }
+        if isHyperShift && keyCode == 126 { return "moveToNext" }
+        if isHyperShift && keyCode == 125 { return "moveToPrev" }
+        if isHyper, let s = fKeySlices[keyCode] { return "setSlices(\(s))" }
+        if isHyperShift && keyCode == 122 { return "appInfo" }
+        if isHyperShift && keyCode == 53 { return "resetWidths" }
+        if isHyperShift && keyCode == 111 { return "restart" }
+        return "unknown(\(keyCode))"
+    }
+
+    private func dispatchAction(_ action: String, keyCode: UInt16, isHyper: Bool, isHyperShift: Bool) {
         // Number keys 1-9
         let numberCodes: [UInt16: Int] = [
             18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9
@@ -74,7 +104,6 @@ final class HotkeyManager {
             let active = mgr.activeWorkspace
             guard active.focusIndex < active.windows.count else { return }
             let window = active.windows[active.focusIndex]
-            slog("Moving window \(window.windowId) → ws\(ws)")
             mgr.moveWindow(window, toWorkspace: ws)
             return
         }
@@ -135,7 +164,6 @@ final class HotkeyManager {
             let window = active.windows[active.focusIndex]
             let targetWs = mgr.activeWorkspaceId + 1
             guard targetWs <= 9 else { return }
-            slog("Moving window \(window.windowId) → ws\(targetWs)")
             mgr.moveWindow(window, toWorkspace: targetWs)
             return
         }
@@ -148,7 +176,6 @@ final class HotkeyManager {
             let window = active.windows[active.focusIndex]
             let targetWs = mgr.activeWorkspaceId - 1
             guard targetWs >= 1 else { return }
-            slog("Moving window \(window.windowId) → ws\(targetWs)")
             mgr.moveWindow(window, toWorkspace: targetWs)
             return
         }

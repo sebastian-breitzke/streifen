@@ -36,6 +36,7 @@ final class WorkspaceManager {
     private var stripLayout: StripLayout?
     private var lastLayoutTime: CFAbsoluteTime = 0
     private var lastSwitchTime: CFAbsoluteTime = 0
+    private var lastScreenChangeTime: CFAbsoluteTime = 0
 
     init(config: StreifenConfig) {
         self.config = config
@@ -59,6 +60,11 @@ final class WorkspaceManager {
     }
 
     @objc private func handleScreenChange(_ notification: Notification) {
+        // Debounce: macOS fires this notification twice per display change
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastScreenChangeTime > 1.0 else { return }
+        lastScreenChangeTime = now
+
         // Delay: NSScreen.screens may not reflect the new configuration immediately
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self else { return }
@@ -67,12 +73,17 @@ final class WorkspaceManager {
             slog("Screen parameters changed → \(sc.rawValue) (\(Int(screen?.width ?? 0))×\(Int(screen?.height ?? 0))) — recalculating all sizes")
 
             // Recalculate all slice counts for the new screen class.
-            // Reset minSliceCount — its value is relative to totalSlices, which
-            // just changed. The next layout pass will re-detect any refusals.
+            // Restore persisted minSliceCount from learned minimum widths.
+            let screenWidth = screen?.width ?? 1920
             for ws in self.workspaces.values {
                 for window in ws.windows {
-                    window.minSliceCount = 1
-                    window.sliceCount = window.appSize.slices(for: sc)
+                    let persistedMin = self.config.minSlicesFor(
+                        bundleId: window.bundleId,
+                        screenWidth: screenWidth, gap: self.config.gap,
+                        totalSlices: sc.totalSlices
+                    )
+                    window.minSliceCount = persistedMin
+                    window.sliceCount = max(persistedMin, window.appSize.slices(for: sc))
                 }
             }
 
@@ -412,12 +423,18 @@ final class WorkspaceManager {
         guard ws.focusIndex < ws.windows.count else { return }
         let window = ws.windows[ws.focusIndex]
 
+        // Verify AX handle is still valid before focusing
+        guard (try? window.axElement.attribute(.position) as CGPoint?) != nil else {
+            slog("Focus skipped window \(window.windowId): \(window.app.localizedName ?? "?") — AX handle stale")
+            return
+        }
+
         // Raise and focus
         do {
             try window.axElement.setAttribute(.main, value: true)
             window.app.activate()
         } catch {
-            slog("Focus failed: \(error)")
+            slog("Focus failed window \(window.windowId): \(window.app.localizedName ?? "?") — \(error)")
         }
 
         // Scroll strip to ensure focused window is visible

@@ -80,6 +80,9 @@ struct StreifenConfig: Sendable, Codable {
     /// App-specific T-Shirt sizes
     var appSizes: [String: AppSize]  // bundleId → size
 
+    /// Learned minimum widths (px) — apps that refuse to shrink below this
+    var appMinWidths: [String: CGFloat]  // bundleId → minimum pixel width
+
     /// Default size for unknown apps
     var defaultSize: AppSize
 
@@ -89,10 +92,16 @@ struct StreifenConfig: Sendable, Codable {
         return appSizes[bid] ?? defaultSize
     }
 
+    /// Calculate persisted minSliceCount for current screen class
+    func minSlicesFor(bundleId: String?, screenWidth: CGFloat, gap: CGFloat, totalSlices: Int) -> Int {
+        guard let bid = bundleId, let minWidth = appMinWidths[bid] else { return 1 }
+        return max(1, min(Int(ceil((minWidth + 2 * gap) * CGFloat(totalSlices) / screenWidth)), totalSlices))
+    }
+
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {
-        case gap, pinnedApps, followApps, floatingApps, appSizes, defaultSize
+        case gap, pinnedApps, followApps, floatingApps, appSizes, appMinWidths, defaultSize
     }
 
     init(
@@ -101,6 +110,7 @@ struct StreifenConfig: Sendable, Codable {
         followApps: Set<String>,
         floatingApps: Set<String>,
         appSizes: [String: AppSize],
+        appMinWidths: [String: CGFloat] = [:],
         defaultSize: AppSize
     ) {
         self.gap = gap
@@ -108,6 +118,7 @@ struct StreifenConfig: Sendable, Codable {
         self.followApps = followApps
         self.floatingApps = floatingApps
         self.appSizes = appSizes
+        self.appMinWidths = appMinWidths
         self.defaultSize = defaultSize
     }
 
@@ -118,6 +129,7 @@ struct StreifenConfig: Sendable, Codable {
         followApps = try c.decode(Set<String>.self, forKey: .followApps)
         floatingApps = try c.decode(Set<String>.self, forKey: .floatingApps)
         appSizes = try c.decode([String: AppSize].self, forKey: .appSizes)
+        appMinWidths = (try? c.decode([String: CGFloat].self, forKey: .appMinWidths)) ?? [:]
         defaultSize = try c.decode(AppSize.self, forKey: .defaultSize)
     }
 

@@ -13,6 +13,9 @@ final class TrackedWindow: @unchecked Sendable {
     /// Bumped by StripLayout when an app refuses AX resize below the target width
     /// (WhatsApp, Teams, etc. enforce an internal minimum width).
     var minSliceCount: Int = 1
+    /// Consecutive prune cycles where AX position was unreadable but window wasn't pruned.
+    /// Reset to 0 when position becomes readable again.
+    var staleCount: Int = 0
 
     init(windowId: CGWindowID, axElement: UIElement, app: NSRunningApplication, frame: CGRect, appSize: AppSize) {
         self.windowId = windowId
@@ -32,12 +35,19 @@ final class TrackedWindow: @unchecked Sendable {
         (try? axElement.attribute(.title) as String?) ?? app.localizedName ?? "Unknown"
     }
 
+    /// Consecutive AX set failures — log first, then every 10th to avoid flooding
+    private var axFailCount: Int = 0
+
     func setPosition(_ point: CGPoint) {
         do {
             try axElement.setAttribute(.position, value: point)
             frame.origin = point
+            axFailCount = 0
         } catch {
-            // Silently ignore — window may have been destroyed
+            axFailCount += 1
+            if axFailCount == 1 || axFailCount % 10 == 0 {
+                slog("AX setPosition failed (\(axFailCount)x) window \(windowId): \(app.localizedName ?? "?") — \(error)")
+            }
         }
     }
 
@@ -46,7 +56,10 @@ final class TrackedWindow: @unchecked Sendable {
             try axElement.setAttribute(.size, value: size)
             frame.size = size
         } catch {
-            // AX resize failed — window may not support it or was destroyed
+            axFailCount += 1
+            if axFailCount == 1 || axFailCount % 10 == 0 {
+                slog("AX setSize failed (\(axFailCount)x) window \(windowId): \(app.localizedName ?? "?") — \(error)")
+            }
         }
     }
 

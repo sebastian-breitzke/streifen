@@ -74,11 +74,22 @@ final class StripLayout {
         if needsRelayout && remainingRetries > 0 {
             layoutPass(workspace: workspace, screenFrame: screenFrame,
                        remainingRetries: remainingRetries - 1)
+        } else if needsRelayout {
+            // Retry exhausted but still mismatched — log for diagnostics
+            for window in windows where window.minSliceCount > 1 {
+                if let actual: CGSize = try? window.axElement.attribute(.size) {
+                    let allocated = screenFrame.width * CGFloat(window.sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
+                    if actual.width > allocated + 10 {
+                        slog("MinSlice still mismatched: \(window.app.localizedName ?? "?") actual \(Int(actual.width))px > allocated \(Int(allocated))px (\(window.sliceCount)/\(sc.totalSlices) slices)")
+                    }
+                }
+            }
         }
     }
 
     /// After setFrame, check whether the app honored the requested width.
     /// Returns true if `window.sliceCount` was bumped and a re-layout is needed.
+    /// Persists learned minimum width in config so future layouts start correct.
     private func syncMinSliceCount(window: TrackedWindow, targetWidth: CGFloat,
                                    screenWidth: CGFloat, gap: CGFloat,
                                    totalSlices: Int) -> Bool {
@@ -94,6 +105,15 @@ final class StripLayout {
 
         guard newMin > window.minSliceCount else { return false }
         window.minSliceCount = newMin
+
+        // Persist learned minimum width so it survives restarts
+        if let bid = window.bundleId {
+            let knownMin = config.appMinWidths[bid] ?? 0
+            if actual.width > knownMin {
+                config.appMinWidths[bid] = actual.width
+                config.save()
+            }
+        }
 
         if window.sliceCount < newMin {
             window.sliceCount = newMin
