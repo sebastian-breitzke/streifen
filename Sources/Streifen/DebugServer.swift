@@ -25,7 +25,7 @@ final class DebugServer {
             params.allowLocalEndpointReuse = true
             listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
         } catch {
-            slog("DebugServer: failed to create listener: \(error)")
+            slog("error", "debug_server", ["err": "\(error)"])
             return
         }
 
@@ -37,9 +37,9 @@ final class DebugServer {
         listener?.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                slog("DebugServer listening on localhost:\(self.port)")
+                slog("lifecycle", "debug_server_ready", ["port": self.port])
             case .failed(let error):
-                slog("DebugServer failed: \(error)")
+                slog("error", "debug_server", ["err": "\(error)"])
             default:
                 break
             }

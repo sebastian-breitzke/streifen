@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugServer = DebugServer(workspaceManager: workspaceManager!)
         debugServer?.start()
 
-        slog("Started — tracking windows")
+        slog("lifecycle", "tracking_started")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         workspaceManager?.restoreAllWindowsOnScreen()
         // Dev mode: re-enable brew service on exit
         restoreBrewService()
-        slog("Shutdown — windows restored")
+        slog("lifecycle", "shutdown")
     }
 
     private static let serviceLabel = "homebrew.mxcl.streifen"
@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if others.isEmpty { break }
                 Thread.sleep(forTimeInterval: 0.1)
             }
-            slog("Stopped brew service (dev mode)")
+            slog("lifecycle", "brew_stopped")
             return
         }
 
@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for app in all {
             if app.processIdentifier != myPid,
                app.localizedName?.lowercased() == "streifen" || app.bundleIdentifier == "de.s16e.streifen" {
-                slog("Killing old instance (pid \(app.processIdentifier))")
+                slog("lifecycle", "killed_old", ["pid": app.processIdentifier])
                 app.terminate()
             }
         }
@@ -106,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let plistPath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/Library/LaunchAgents/\(Self.serviceLabel).plist"
         guard FileManager.default.fileExists(atPath: plistPath) else { return }
         launchctl("bootstrap", "gui/\(getuid())", plistPath)
-        slog("Re-enabled brew service")
+        slog("lifecycle", "brew_restored")
     }
 
     private func launchctl(_ args: String...) {
@@ -122,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func checkAccessibility() -> Bool {
         let trusted = UIElement.isProcessTrusted(withPrompt: true)
         if !trusted {
-            slog("Accessibility not granted — prompting user")
+            slog("error", "accessibility_missing")
         }
         return trusted
     }

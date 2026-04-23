@@ -146,13 +146,13 @@ struct StreifenConfig: Sendable, Codable {
         let url = configURL
         if let data = try? Data(contentsOf: url),
            let config = try? JSONDecoder().decode(StreifenConfig.self, from: data) {
-            slog("Config loaded from \(url.path)")
+            slog("config", "loaded", ["path": url.path])
             return config
         }
         // First launch or corrupt file — write defaults
         let config = StreifenConfig.hardcodedDefault
         config.save()
-        slog("Config written to \(url.path) (defaults)")
+        slog("config", "defaults_written", ["path": url.path])
         return config
     }
 

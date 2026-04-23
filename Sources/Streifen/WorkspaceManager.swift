@@ -70,7 +70,7 @@ final class WorkspaceManager {
             guard let self else { return }
             let sc = ScreenClass.current
             let screen = NSScreen.managed?.visibleFrame
-            slog("Screen parameters changed → \(sc.rawValue) (\(Int(screen?.width ?? 0))×\(Int(screen?.height ?? 0))) — recalculating all sizes")
+            slog("config", "screen_changed", ["class": sc.rawValue, "w": Int(screen?.width ?? 0), "h": Int(screen?.height ?? 0)])
 
             // Recalculate all slice counts for the new screen class.
             // Restore persisted minSliceCount from learned minimum widths.
@@ -145,9 +145,9 @@ final class WorkspaceManager {
         // Log assignment details
         for (wsId, ws) in workspaces.sorted(by: { $0.key < $1.key }) where !ws.windows.isEmpty {
             let names = ws.windows.map { "\($0.app.localizedName ?? "?")(\($0.windowId))" }.joined(separator: ", ")
-            slog("  WS \(wsId): \(names)")
+            slog("ws", "initial_sort_detail", ["ws": wsId, "windows": names])
         }
-        slog("Initial sort: \(windows.count) windows")
+        slog("ws", "initial_sort", ["n": windows.count])
         saveState()
     }
 
@@ -240,7 +240,7 @@ final class WorkspaceManager {
                 targetWs.focusIndex = idx
             }
             switchTo(workspace: targetWsId)
-            slog("Auto-switched to ws\(targetWsId) (pinned app \(window.bundleId ?? "?") activated)")
+            slog("ws", "auto_switched", ["to": targetWsId, "reason": "pinned app", "bid": window.bundleId ?? "?"])
         }
     }
 
@@ -253,7 +253,7 @@ final class WorkspaceManager {
                 if let idx = ws.windows.firstIndex(where: { $0.windowId == windowId }) {
                     let window = ws.windows.remove(at: idx)
                     ws.minimizedWindows.append(window)
-                    slog("Minimized \(window.app.localizedName ?? "?") (\(windowId)) on ws\(ws.id)")
+                    slog("track", "minimized", ["wid": windowId, "app": window.app.localizedName ?? "?", "ws": ws.id])
 
                     if ws.id == activeWorkspaceId {
                         // Clamp focus index
@@ -274,7 +274,7 @@ final class WorkspaceManager {
                 // Move from minimizedWindows → windows
                 if let idx = ws.minimizedWindows.firstIndex(where: { $0.windowId == windowId }) {
                     let window = ws.minimizedWindows.remove(at: idx)
-                    slog("Unminimized \(window.app.localizedName ?? "?") (\(windowId)) on ws\(ws.id)")
+                    slog("track", "unminimized", ["wid": windowId, "app": window.app.localizedName ?? "?", "ws": ws.id])
 
                     if ws.id == activeWorkspaceId {
                         // Insert near current focus
@@ -311,7 +311,7 @@ final class WorkspaceManager {
 
         guard newSlices != window.sliceCount else { return }
         window.setSliceCount(newSlices)
-        slog("Manual resize → \(window.title): \(window.sliceCount) slices")
+        slog("resize", "manual", ["wid": window.windowId, "title": window.title, "s": window.sliceCount])
         ensureWindowVisible(at: ws.focusIndex)
         saveState()
     }
@@ -322,6 +322,8 @@ final class WorkspaceManager {
         guard targetId >= 1 && targetId <= 9 else { return }
         guard targetId != activeWorkspaceId else { return }
 
+        let fromId = activeWorkspaceId
+        let hiddenCount = activeWorkspace.windows.count
         lastSwitchTime = CFAbsoluteTimeGetCurrent()
         windowTracker?.beginProgrammaticUpdate()
 
@@ -349,7 +351,7 @@ final class WorkspaceManager {
 
         saveState()
         OverlayPanel.shared.showWorkspace(targetId)
-        slog("Switched to workspace \(targetId)")
+        slog("ws", "switched", ["from": fromId, "to": targetId, "hidden": hiddenCount, "shown": activeWorkspace.windows.count])
     }
 
     func switchPrevious() {
@@ -391,6 +393,7 @@ final class WorkspaceManager {
         if ws.focusIndex >= ws.windows.count {
             ws.focusIndex = max(0, ws.windows.count - 1)
         }
+        slog("ws", "move_window", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "from": activeWorkspaceId, "to": targetId])
         OverlayPanel.shared.showMovedToWorkspace(targetId)
         layoutActiveWorkspace()
         activateFocusedWindow()
@@ -404,7 +407,10 @@ final class WorkspaceManager {
         let ws = activeWorkspace
         guard !ws.windows.isEmpty else { return }
         let newIdx = max(0, ws.focusIndex - 1)
-        guard newIdx != ws.focusIndex else { return }  // hard stop at left edge
+        if newIdx == ws.focusIndex {
+            slog("focus", "edge", ["dir": "left", "idx": ws.focusIndex])
+            return
+        }
         ws.focusIndex = newIdx
         focusCurrentWindow()
     }
@@ -413,7 +419,10 @@ final class WorkspaceManager {
         let ws = activeWorkspace
         guard !ws.windows.isEmpty else { return }
         let newIdx = min(ws.windows.count - 1, ws.focusIndex + 1)
-        guard newIdx != ws.focusIndex else { return }  // hard stop at right edge
+        if newIdx == ws.focusIndex {
+            slog("focus", "edge", ["dir": "right", "idx": ws.focusIndex])
+            return
+        }
         ws.focusIndex = newIdx
         focusCurrentWindow()
     }
@@ -425,7 +434,7 @@ final class WorkspaceManager {
 
         // Verify AX handle is still valid before focusing
         guard (try? window.axElement.attribute(.position) as CGPoint?) != nil else {
-            slog("Focus skipped window \(window.windowId): \(window.app.localizedName ?? "?") — AX handle stale")
+            slog("focus", "skipped", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "reason": "AX stale"])
             return
         }
 
@@ -433,8 +442,9 @@ final class WorkspaceManager {
         do {
             try window.axElement.setAttribute(.main, value: true)
             window.app.activate()
+            slog("focus", "ok", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "idx": ws.focusIndex])
         } catch {
-            slog("Focus failed window \(window.windowId): \(window.app.localizedName ?? "?") — \(error)")
+            slog("error", "focus_failed", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "err": "\(error)"])
         }
 
         // Scroll strip to ensure focused window is visible
@@ -523,6 +533,7 @@ final class WorkspaceManager {
             // If the focused window is on the active workspace, use it directly
             if let idx = ws.windows.firstIndex(where: { $0.windowId == wid }) {
                 ws.focusIndex = idx
+                slog("focus", "app_activated", ["app": app.localizedName ?? "?", "path": "local_ax", "wid": wid, "idx": idx])
                 ensureWindowVisible(at: idx)
                 return
             }
@@ -532,11 +543,13 @@ final class WorkspaceManager {
             if let local = localWindow,
                let idx = ws.windows.firstIndex(where: { $0.windowId == local.windowId }) {
                 ws.focusIndex = idx
+                slog("focus", "app_activated", ["app": app.localizedName ?? "?", "path": "local_prefer", "wid": local.windowId, "idx": idx])
                 ensureWindowVisible(at: idx)
                 return
             }
 
             // No local window — switch to the workspace with the focused window
+            slog("focus", "app_activated", ["app": app.localizedName ?? "?", "path": "cross_ws", "wid": wid])
             handleWindowFocused(windowId: wid)
             return
         }
@@ -545,11 +558,13 @@ final class WorkspaceManager {
         if let local = localWindow,
            let idx = ws.windows.firstIndex(where: { $0.windowId == local.windowId }) {
             ws.focusIndex = idx
+            slog("focus", "app_activated", ["app": app.localizedName ?? "?", "path": "local_fallback", "wid": local.windowId, "idx": idx])
             ensureWindowVisible(at: idx)
             return
         }
 
         // Search other workspaces — switch to the one containing this app's window
+        slog("focus", "app_activated", ["app": app.localizedName ?? "?", "path": "search_other_ws"])
         switchToWorkspaceContaining(pid: pid, reason: "app activated, fallback")
     }
 
@@ -569,7 +584,7 @@ final class WorkspaceManager {
                     try window.axElement.setAttribute(.main, value: true)
                     window.app.activate()
                 } catch {}
-                slog("Auto-switched to workspace \(wsId) (\(reason))")
+                slog("ws", "auto_switched", ["to": wsId, "reason": reason])
                 return true
             }
         }
@@ -607,7 +622,7 @@ final class WorkspaceManager {
             ws.windows.append(window)
             ws.focusIndex = ws.windows.count - 1
             ensureWindowVisible(at: ws.focusIndex)
-            slog("Pulled follow-app \(bundleId) to workspace \(activeWorkspaceId)")
+            slog("ws", "follow_pulled", ["bid": bundleId, "to": activeWorkspaceId])
             return
         }
 
@@ -624,7 +639,7 @@ final class WorkspaceManager {
                 sourceWs.focusIndex = idx
             }
             switchTo(workspace: sourceWsId)
-            slog("Auto-switched to workspace \(sourceWsId) (window focus)")
+            slog("ws", "auto_switched", ["to": sourceWsId, "reason": "window focus"])
         }
     }
 
@@ -648,8 +663,10 @@ final class WorkspaceManager {
     func moveWindowLeft() {
         let ws = activeWorkspace
         guard ws.focusIndex > 0 else { return }
+        let window = ws.windows[ws.focusIndex]
         ws.windows.swapAt(ws.focusIndex, ws.focusIndex - 1)
         ws.focusIndex -= 1
+        slog("layout", "reorder", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "dir": "left", "idx": ws.focusIndex])
         OverlayPanel.shared.showReorder(position: ws.focusIndex + 1, total: ws.windows.count, direction: "◀")
         ensureWindowVisible(at: ws.focusIndex)
     }
@@ -657,8 +674,10 @@ final class WorkspaceManager {
     func moveWindowRight() {
         let ws = activeWorkspace
         guard ws.focusIndex < ws.windows.count - 1 else { return }
+        let window = ws.windows[ws.focusIndex]
         ws.windows.swapAt(ws.focusIndex, ws.focusIndex + 1)
         ws.focusIndex += 1
+        slog("layout", "reorder", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "dir": "right", "idx": ws.focusIndex])
         OverlayPanel.shared.showReorder(position: ws.focusIndex + 1, total: ws.windows.count, direction: "▶")
         ensureWindowVisible(at: ws.focusIndex)
     }
@@ -673,7 +692,7 @@ final class WorkspaceManager {
         window.setSliceCount(count)
         let sc = ScreenClass.current
         OverlayPanel.shared.showSlices(window.sliceCount, total: sc.totalSlices)
-        slog("Slices → \(window.sliceCount)/\(sc.totalSlices)")
+        slog("resize", "set", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "s": window.sliceCount, "total": sc.totalSlices])
         ensureWindowVisible(at: ws.focusIndex)
     }
 
@@ -685,7 +704,7 @@ final class WorkspaceManager {
         window.setSliceCount(window.sliceCount + delta)
         let sc = ScreenClass.current
         OverlayPanel.shared.showSlices(window.sliceCount, total: sc.totalSlices)
-        slog("Slices → \(window.sliceCount)/\(sc.totalSlices)")
+        slog("resize", "step", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "s": window.sliceCount, "total": sc.totalSlices, "delta": delta])
         ensureWindowVisible(at: ws.focusIndex)
     }
 
@@ -710,7 +729,7 @@ final class WorkspaceManager {
 
         config.save()
         OverlayPanel.shared.showAppDefault(size.rawValue.uppercased(), appName: window.app.localizedName ?? "App")
-        slog("App default → \(bundleId): \(size.rawValue) (\(count) windows updated)")
+        slog("config", "app_default", ["bid": bundleId, "size": size.rawValue, "n": count])
         ensureWindowVisible(at: ws.focusIndex)
     }
 
@@ -772,7 +791,9 @@ final class WorkspaceManager {
 
         config.save()
         ensureWindowVisible(at: activeWorkspace.focusIndex)
-        slog("App config updated → \(bundleId): size=\(size.rawValue) pinned=\(pinnedWs.map(String.init) ?? "—") follow=\(follow) floating=\(floating)")
+        var d: [String: Any] = ["bid": bundleId, "size": size.rawValue, "follow": follow, "floating": floating]
+        if let ws = pinnedWs { d["pinned"] = ws }
+        slog("config", "app_updated", d)
     }
 
     /// Reset all windows in active workspace to their app-default sizes
@@ -784,7 +805,7 @@ final class WorkspaceManager {
         }
         ws.scrollOffset = 0
         OverlayPanel.shared.showMessage("Reset")
-        slog("Reset all widths to app defaults (\(ws.windows.count) windows)")
+        slog("resize", "reset_all", ["n": ws.windows.count])
         ensureWindowVisible(at: ws.focusIndex)
     }
 
@@ -915,7 +936,7 @@ final class WorkspaceManager {
         layoutActiveWorkspace()  // schedules endProgrammaticUpdate after 50ms
         activateFocusedWindow()
         updateMenuBar()
-        slog("Reset — all windows moved to workspace 1")
+        slog("lifecycle", "reset")
     }
 
     // MARK: - State Persistence
@@ -960,7 +981,7 @@ final class WorkspaceManager {
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: wrapper, options: .prettyPrinted) else { return }
         try? data.write(to: Self.stateURL)
-        slog("State saved (\(state.count) windows)")
+        slog("lifecycle", "state_saved", ["n": state.count])
     }
 
     /// Restore state if saved less than 15 minutes ago. Returns true if restored.
@@ -973,7 +994,7 @@ final class WorkspaceManager {
         // Only restore if fresh (< 15 min)
         let age = Date().timeIntervalSince1970 - timestamp
         guard age < 900 else {
-            slog("State too old (\(Int(age))s), ignoring")
+            slog("lifecycle", "state_expired", ["age": Int(age)])
             return false
         }
 
@@ -1050,7 +1071,7 @@ final class WorkspaceManager {
         activateFocusedWindow()
         updateMenuBar()
         scheduleOffscreenSweep()
-        slog("State restored (\(restored)/\(allWindows.count) windows matched, age \(Int(age))s)")
+        slog("lifecycle", "state_restored", ["matched": restored, "total": allWindows.count, "age": Int(age)])
         saveState()
         return true
     }

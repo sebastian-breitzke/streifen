@@ -80,7 +80,7 @@ final class StripLayout {
                 if let actual: CGSize = try? window.axElement.attribute(.size) {
                     let allocated = screenFrame.width * CGFloat(window.sliceCount) / CGFloat(sc.totalSlices) - (2 * gap)
                     if actual.width > allocated + 10 {
-                        slog("MinSlice still mismatched: \(window.app.localizedName ?? "?") actual \(Int(actual.width))px > allocated \(Int(allocated))px (\(window.sliceCount)/\(sc.totalSlices) slices)")
+                        slog("resize", "min_mismatch", ["app": window.app.localizedName ?? "?", "actual": Int(actual.width), "alloc": Int(allocated), "s": window.sliceCount, "total": sc.totalSlices])
                     }
                 }
             }
@@ -117,7 +117,7 @@ final class StripLayout {
 
         if window.sliceCount < newMin {
             window.sliceCount = newMin
-            slog("Bumped \(window.app.localizedName ?? "?") minSliceCount → \(newMin) (actual width \(Int(actual.width)) > target \(Int(targetWidth)))")
+            slog("resize", "min_bump", ["app": window.app.localizedName ?? "?", "min": newMin, "actual": Int(actual.width), "target": Int(targetWidth)])
             return true
         }
         return false

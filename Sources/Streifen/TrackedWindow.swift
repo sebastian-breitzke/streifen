@@ -46,7 +46,7 @@ final class TrackedWindow: @unchecked Sendable {
         } catch {
             axFailCount += 1
             if axFailCount == 1 || axFailCount % 10 == 0 {
-                slog("AX setPosition failed (\(axFailCount)x) window \(windowId): \(app.localizedName ?? "?") — \(error)")
+                slog("error", "ax_set_pos", ["wid": windowId, "app": app.localizedName ?? "?", "n": axFailCount, "err": "\(error)"])
             }
         }
     }
@@ -58,7 +58,7 @@ final class TrackedWindow: @unchecked Sendable {
         } catch {
             axFailCount += 1
             if axFailCount == 1 || axFailCount % 10 == 0 {
-                slog("AX setSize failed (\(axFailCount)x) window \(windowId): \(app.localizedName ?? "?") — \(error)")
+                slog("error", "ax_set_size", ["wid": windowId, "app": app.localizedName ?? "?", "n": axFailCount, "err": "\(error)"])
             }
         }
     }

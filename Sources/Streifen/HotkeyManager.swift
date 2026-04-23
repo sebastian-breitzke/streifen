@@ -27,7 +27,7 @@ final class HotkeyManager {
             callback: hotkeyCallback,
             userInfo: refcon
         ) else {
-            slog("Failed to create CGEvent tap — check accessibility permissions")
+            slog("error", "event_tap_failed")
             return
         }
 
@@ -36,7 +36,7 @@ final class HotkeyManager {
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
-        slog("Hotkeys registered (CGEvent tap)")
+        slog("lifecycle", "hotkeys_registered")
     }
 
     func unregisterHotkeys() {
@@ -54,7 +54,7 @@ final class HotkeyManager {
 
     fileprivate func handleHotkey(keyCode: UInt16, isHyper: Bool, isHyperShift: Bool) {
         let action = resolveAction(keyCode: keyCode, isHyper: isHyper, isHyperShift: isHyperShift)
-        slog("Hotkey: \(action) (key=\(keyCode) \(isHyperShift ? "hyper+shift" : "hyper"))")
+        slog("hotkey", "pressed", ["action": action, "key": keyCode, "shift": isHyperShift])
         dispatchAction(action, keyCode: keyCode, isHyper: isHyper, isHyperShift: isHyperShift)
     }
 
@@ -222,7 +222,7 @@ final class HotkeyManager {
 
     private func dumpFocusedWindow() {
         guard let frontApp = NSWorkspace.shared.frontmostApplication else {
-            slog("⚠️ DUMP: No frontmost app")
+            slog("debug", "window_dump", ["err": "no frontmost app"])
             return
         }
 
@@ -231,7 +231,7 @@ final class HotkeyManager {
         var focusedRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appRef, kAXFocusedWindowAttribute as CFString, &focusedRef)
         guard result == .success, let windowEl = focusedRef else {
-            slog("⚠️ DUMP: No focused window for \(frontApp.localizedName ?? "?")")
+            slog("debug", "window_dump", ["app": frontApp.localizedName ?? "?", "err": "no focused window"])
             return
         }
 
@@ -266,20 +266,17 @@ final class HotkeyManager {
         let size = axSize(kAXSizeAttribute as String)
         let isTracked = workspaceManager?.activeWorkspace.windows.contains(where: { $0.windowId == windowId }) ?? false
 
-        slog("🔍 WINDOW DUMP")
-        slog("  app: \(frontApp.localizedName ?? "?") (\(frontApp.bundleIdentifier ?? "?"))")
-        slog("  windowId: \(windowId)")
-        slog("  title: \(axStr(kAXTitleAttribute as String))")
-        slog("  role: \(axStr(kAXRoleAttribute as String))")
-        slog("  subrole: \(axStr(kAXSubroleAttribute as String))")
-        slog("  main: \(axStr(kAXMainAttribute as String))")
-        slog("  modal: \(axStr(kAXModalAttribute as String))")
-        slog("  fullScreen: \(axStr("AXFullScreen"))")
-        slog("  identifier: \(axStr(kAXIdentifierAttribute as String))")
-        slog("  pos: \(pos.map { "\($0)" } ?? "nil")")
-        slog("  size: \(size.map { "\($0)" } ?? "nil")")
-        slog("  tracked: \(isTracked)")
-        slog("  --- END DUMP ---")
+        slog("debug", "window_dump", [
+            "app": frontApp.localizedName ?? "?",
+            "bid": frontApp.bundleIdentifier ?? "?",
+            "wid": windowId,
+            "title": axStr(kAXTitleAttribute as String),
+            "role": axStr(kAXRoleAttribute as String),
+            "subrole": axStr(kAXSubroleAttribute as String),
+            "pos": pos.map { "\(Int($0.x)),\(Int($0.y))" } ?? "nil",
+            "size": size.map { "\(Int($0.width))x\(Int($0.height))" } ?? "nil",
+            "tracked": isTracked,
+        ])
     }
 }
 

@@ -119,7 +119,7 @@ final class WindowTracker {
             guard windowId != 0, trackedWindows[windowId] == nil else { continue }
 
             let title: String? = try? axWindow.attribute(.title)
-            slog("Track window \(windowId): \(app.localizedName ?? "?") — \"\(title ?? "")\" [\(Int(size.width))×\(Int(size.height))] subrole=\(subrole ?? "nil")")
+            slog("track", "discovered", ["wid": windowId, "app": app.localizedName ?? "?", "title": title ?? "", "size": "\(Int(size.width))x\(Int(size.height))", "subrole": subrole ?? "nil"])
 
             let appSize = config.sizeFor(bundleId: app.bundleIdentifier)
             let tracked = TrackedWindow(
@@ -173,7 +173,7 @@ final class WindowTracker {
             try observer.addNotification(.windowMiniaturized, forElement: appElement)
             try observer.addNotification(.windowDeminiaturized, forElement: appElement)
         } catch {
-            slog("Observer setup failed for pid \(pid): \(error)")
+            slog("error", "observer_failed", ["pid": pid, "err": "\(error)"])
         }
 
         observers[pid] = observer
@@ -203,7 +203,7 @@ final class WindowTracker {
             // Try to match the destroyed element directly
             if let wid = getWindowId(from: element) {
                 if let removed = trackedWindows[wid] {
-                    slog("Untrack window \(wid): \(removed.app.localizedName ?? "?")")
+                    slog("track", "untracked", ["wid": wid, "app": removed.app.localizedName ?? "?"])
                 }
                 trackedWindows.removeValue(forKey: wid)
             } else {
@@ -308,7 +308,7 @@ final class WindowTracker {
         for (id, window) in trackedWindows {
             if (try? window.axElement.attribute(.position) as CGPoint?) == nil {
                 if window.app.isTerminated {
-                    slog("Prune dead window \(id): \(window.app.localizedName ?? "?") (app terminated)")
+                    slog("track", "pruned", ["wid": id, "app": window.app.localizedName ?? "?", "reason": "app terminated"])
                     trackedWindows.removeValue(forKey: id)
                     pruned = true
                     continue
@@ -321,20 +321,20 @@ final class WindowTracker {
                    let axWindows = try? appElement.windows() {
                     let liveIds = Set(axWindows.compactMap { getWindowId(from: $0) })
                     if !liveIds.isEmpty && !liveIds.contains(id) {
-                        slog("Prune dead window \(id): \(window.app.localizedName ?? "?") (window closed, \(liveIds.count) siblings alive)")
+                        slog("track", "pruned", ["wid": id, "app": window.app.localizedName ?? "?", "reason": "window closed", "siblings": liveIds.count])
                         trackedWindows.removeValue(forKey: id)
                         pruned = true
                         continue
                     }
                     // App returned empty list or window still in list — log periodically
                     if window.staleCount == 3 || window.staleCount % 10 == 0 {
-                        slog("Stale window \(id): \(window.app.localizedName ?? "?") — AX unreadable, app reports \(liveIds.count) windows (attempt \(window.staleCount)/\(Self.maxStaleChecks))")
+                        slog("track", "stale", ["wid": id, "app": window.app.localizedName ?? "?", "n": window.staleCount, "max": Self.maxStaleChecks, "siblings": liveIds.count])
                     }
                 }
 
                 // Force-prune after max attempts
                 if window.staleCount >= Self.maxStaleChecks {
-                    slog("Force-prune zombie \(id): \(window.app.localizedName ?? "?") (unreadable for \(window.staleCount) checks)")
+                    slog("track", "pruned", ["wid": id, "app": window.app.localizedName ?? "?", "reason": "zombie", "stale": window.staleCount])
                     trackedWindows.removeValue(forKey: id)
                     pruned = true
                 }
@@ -366,7 +366,7 @@ final class WindowTracker {
             discoverWindows(for: app)
             let added = trackedWindows.count - before
             if added > 0 {
-                slog("Re-discovered \(added) window(s) for \(app.localizedName ?? "?")")
+                slog("track", "rediscovered", ["app": app.localizedName ?? "?", "n": added])
                 totalFound += added
             }
         }
