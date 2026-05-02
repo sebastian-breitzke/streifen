@@ -62,7 +62,8 @@ final class StripLayout {
             window.setFrame(visibleFrame)
 
             // Detect apps that refused to shrink and bump their min slice count.
-            if syncMinSliceCount(window: window, targetWidth: clampedWidth,
+            if syncMinSliceCount(window: window, targetOrigin: visibleFrame.origin,
+                                 targetWidth: clampedWidth,
                                  screenWidth: screenFrame.width, gap: gap,
                                  totalSlices: sc.totalSlices) {
                 needsRelayout = true
@@ -90,7 +91,8 @@ final class StripLayout {
     /// After setFrame, check whether the app honored the requested width.
     /// Returns true if `window.sliceCount` was bumped and a re-layout is needed.
     /// Persists learned minimum width in config so future layouts start correct.
-    private func syncMinSliceCount(window: TrackedWindow, targetWidth: CGFloat,
+    private func syncMinSliceCount(window: TrackedWindow, targetOrigin: CGPoint,
+                                   targetWidth: CGFloat,
                                    screenWidth: CGFloat, gap: CGFloat,
                                    totalSlices: Int) -> Bool {
         // At max slices, the slot already spans the full screen minus gaps.
@@ -102,21 +104,37 @@ final class StripLayout {
         let tolerance: CGFloat = 2 * gap + 10
         guard let actual: CGSize = try? window.axElement.attribute(.size),
               actual.width > targetWidth + tolerance else { return false }
+        // If the window is on a different screen (cross-screen drag, fullscreen),
+        // the AX setPosition silently fails and our slot-width target is meaningless.
+        // Skip min-bump rather than learning a bogus screen-spanning minimum.
+        if let actualOrigin: CGPoint = try? window.axElement.attribute(.position),
+           hypot(actualOrigin.x - targetOrigin.x, actualOrigin.y - targetOrigin.y) > 100 {
+            slog("resize", "min_skip_offscreen", ["app": window.app.localizedName ?? "?", "actual_x": Int(actualOrigin.x), "target_x": Int(targetOrigin.x)])
+            return false
+        }
 
         // Slot width for N slices: screenWidth * N / totalSlices - 2*gap ≥ actual.width
         // → N ≥ (actual.width + 2*gap) * totalSlices / screenWidth
         let slicesNeeded = Int(ceil((actual.width + 2 * gap) * CGFloat(totalSlices) / screenWidth))
-        let newMin = max(1, min(slicesNeeded, totalSlices))
+        // Cap below totalSlices: pinning a window to the maximum takes user control
+        // away. If the actual width truly needs the full screen, surface as a
+        // mismatch rather than make max-slices the permanent floor.
+        let newMin = max(1, min(slicesNeeded, totalSlices - 1))
 
         guard newMin > window.minSliceCount else { return false }
         window.minSliceCount = newMin
 
-        // Persist learned minimum width so it survives restarts
+        // Persist learned minimum width so it survives restarts. Only persist
+        // when the learned width fits within (totalSlices - 1) slots so a
+        // future launch is never pinned to max slices.
         if let bid = window.bundleId {
-            let knownMin = config.appMinWidths[bid] ?? 0
-            if actual.width > knownMin {
-                config.appMinWidths[bid] = actual.width
-                config.save()
+            let maxPersistable = screenWidth * CGFloat(totalSlices - 1) / CGFloat(totalSlices) - 2 * gap
+            if actual.width <= maxPersistable {
+                let knownMin = config.appMinWidths[bid] ?? 0
+                if actual.width > knownMin {
+                    config.appMinWidths[bid] = actual.width
+                    config.save()
+                }
             }
         }
 
