@@ -97,8 +97,9 @@ final class StripLayout {
         // Apps that ignore the gap and fill edge-to-edge would otherwise be
         // misread as "refusing to shrink" and get pinned to max forever.
         guard window.sliceCount < totalSlices else { return false }
-        // Tolerance covers sub-pixel AX rounding; real refusals are tens of pixels.
-        let tolerance: CGFloat = 10
+        // Tolerance must absorb apps that ignore our gap and fill slot edge-to-edge
+        // (up to 2*gap wider than target). Real internal-min refusals are 50px+.
+        let tolerance: CGFloat = 2 * gap + 10
         guard let actual: CGSize = try? window.axElement.attribute(.size),
               actual.width > targetWidth + tolerance else { return false }
 
