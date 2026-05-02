@@ -602,8 +602,19 @@ final class WorkspaceManager {
             // Prevents stale notifications from deactivating apps from
             // overriding the scroll position set by handleAppActivated.
             if !allowWorkspaceSwitch {
+                let pid = ws.windows[idx].app.processIdentifier
                 let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
-                if ws.windows[idx].app.processIdentifier != frontPid {
+                if pid != frontPid {
+                    return
+                }
+                // Verify the event matches the app's current AX-focused window.
+                // When an app opens a new window, raising siblings during layout
+                // can fire stale focusedWindowChanged for an older window of the
+                // same app — accepting those would roll focusIndex back.
+                if let appElement = AXSwift.Application(forProcessID: pid),
+                   let focused: UIElement = try? appElement.attribute(.focusedWindow),
+                   let focusedWid = getWindowId(from: focused),
+                   focusedWid != windowId {
                     return
                 }
             }
