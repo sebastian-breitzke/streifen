@@ -113,28 +113,31 @@ final class StripLayout {
             return false
         }
 
+        // A width that wouldn't fit in (totalSlices - 1) slots is not a learnable
+        // per-app minimum — it's AX failure, fullscreen, or a genuinely full-screen
+        // window. The position guard above can miss these when the broken-state
+        // origin happens to coincide with the target slot (e.g. slot 0 at top-left).
+        // Bail rather than pinning the in-memory minSliceCount to max-1.
+        let maxLearnable = screenWidth * CGFloat(totalSlices - 1) / CGFloat(totalSlices) - 2 * gap
+        guard actual.width <= maxLearnable else {
+            slog("resize", "min_skip_unlearnable", ["app": window.app.localizedName ?? "?", "actual": Int(actual.width)])
+            return false
+        }
+
         // Slot width for N slices: screenWidth * N / totalSlices - 2*gap ≥ actual.width
         // → N ≥ (actual.width + 2*gap) * totalSlices / screenWidth
         let slicesNeeded = Int(ceil((actual.width + 2 * gap) * CGFloat(totalSlices) / screenWidth))
-        // Cap below totalSlices: pinning a window to the maximum takes user control
-        // away. If the actual width truly needs the full screen, surface as a
-        // mismatch rather than make max-slices the permanent floor.
         let newMin = max(1, min(slicesNeeded, totalSlices - 1))
 
         guard newMin > window.minSliceCount else { return false }
         window.minSliceCount = newMin
 
-        // Persist learned minimum width so it survives restarts. Only persist
-        // when the learned width fits within (totalSlices - 1) slots so a
-        // future launch is never pinned to max slices.
+        // Persist learned minimum width so it survives restarts.
         if let bid = window.bundleId {
-            let maxPersistable = screenWidth * CGFloat(totalSlices - 1) / CGFloat(totalSlices) - 2 * gap
-            if actual.width <= maxPersistable {
-                let knownMin = config.appMinWidths[bid] ?? 0
-                if actual.width > knownMin {
-                    config.appMinWidths[bid] = actual.width
-                    config.save()
-                }
+            let knownMin = config.appMinWidths[bid] ?? 0
+            if actual.width > knownMin {
+                config.appMinWidths[bid] = actual.width
+                config.save()
             }
         }
 
