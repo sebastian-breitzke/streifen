@@ -37,6 +37,8 @@ final class WorkspaceManager {
     private var lastLayoutTime: CFAbsoluteTime = 0
     private var lastSwitchTime: CFAbsoluteTime = 0
     private var lastScreenChangeTime: CFAbsoluteTime = 0
+    private var lastFocusedWid: CGWindowID?
+    private var lastFocusTime: CFAbsoluteTime = 0
 
     init(config: StreifenConfig) {
         self.config = config
@@ -442,6 +444,8 @@ final class WorkspaceManager {
         do {
             try window.axElement.setAttribute(.main, value: true)
             window.app.activate()
+            lastFocusedWid = window.windowId
+            lastFocusTime = CFAbsoluteTimeGetCurrent()
             slog("focus", "ok", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "idx": ws.focusIndex])
         } catch {
             slog("error", "focus_failed", ["wid": window.windowId, "app": window.app.localizedName ?? "?", "err": "\(error)"])
@@ -520,6 +524,18 @@ final class WorkspaceManager {
 
         let pid = app.processIdentifier
         let ws = activeWorkspace
+
+        // If we just programmatically focused a specific window of this app via
+        // hotkey, AX's focusedWindow read below can lag and return the previously
+        // focused window. Trust our own recent focus instead.
+        if CFAbsoluteTimeGetCurrent() - lastFocusTime < 0.5,
+           let recentWid = lastFocusedWid,
+           let idx = ws.windows.firstIndex(where: { $0.windowId == recentWid }),
+           ws.windows[idx].app.processIdentifier == pid {
+            ws.focusIndex = idx
+            slog("focus", "app_activated", ["app": app.localizedName ?? "?", "path": "recent_focus", "wid": recentWid, "idx": idx])
+            return
+        }
 
         // If this app has a window on the active workspace, prefer staying here.
         // AX's focusedWindow might report a window from another workspace (stale focus).
