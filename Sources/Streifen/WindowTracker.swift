@@ -202,6 +202,13 @@ final class WindowTracker {
         case .uiElementDestroyed:
             // Try to match the destroyed element directly
             if let wid = getWindowId(from: element) {
+                // Some apps (Outlook, Teams) fire spurious destroy notifications
+                // on internal AX re-renders even though the window persists. If the
+                // tracked element is still readable, treat the event as spurious.
+                if let tracked = trackedWindows[wid],
+                   (try? tracked.axElement.attribute(.position) as CGPoint?) != nil {
+                    return
+                }
                 if let removed = trackedWindows[wid] {
                     slog("track", "untracked", ["wid": wid, "app": removed.app.localizedName ?? "?"])
                 }

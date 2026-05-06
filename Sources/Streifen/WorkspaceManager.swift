@@ -160,6 +160,9 @@ final class WorkspaceManager {
             $0.windows.map { $0.windowId } + $0.minimizedWindows.map { $0.windowId }
         })
         let ws = activeWorkspace
+        let focusedWidBefore: CGWindowID? = ws.focusIndex < ws.windows.count
+            ? ws.windows[ws.focusIndex].windowId
+            : nil
         var added = false
         var pinnedSwitchTarget: (Int, TrackedWindow)? = nil
 
@@ -229,7 +232,15 @@ final class WorkspaceManager {
             } else {
                 layoutActiveWorkspace()
             }
-            activateFocusedWindow()
+            // Only raise/activate when focus on the active workspace actually
+            // moved. Otherwise spurious add/remove storms (e.g. Outlook AX flapping)
+            // would yank the frontmost app around for no user-visible reason.
+            let focusedWidAfter: CGWindowID? = ws.focusIndex < ws.windows.count
+                ? ws.windows[ws.focusIndex].windowId
+                : nil
+            if focusedWidBefore != focusedWidAfter {
+                activateFocusedWindow()
+            }
             saveState()
         }
 
