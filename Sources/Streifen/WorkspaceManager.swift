@@ -75,17 +75,9 @@ final class WorkspaceManager {
             slog("config", "screen_changed", ["class": sc.rawValue, "w": Int(screen?.width ?? 0), "h": Int(screen?.height ?? 0)])
 
             // Recalculate all slice counts for the new screen class.
-            // Restore persisted minSliceCount from learned minimum widths.
-            let screenWidth = screen?.width ?? 1920
             for ws in self.workspaces.values {
                 for window in ws.windows {
-                    let persistedMin = self.config.minSlicesFor(
-                        bundleId: window.bundleId,
-                        screenWidth: screenWidth, gap: self.config.gap,
-                        totalSlices: sc.totalSlices
-                    )
-                    window.minSliceCount = persistedMin
-                    window.sliceCount = max(persistedMin, window.appSize.slices(for: sc))
+                    window.sliceCount = window.appSize.slices(for: sc)
                 }
             }
 

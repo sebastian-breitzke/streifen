@@ -130,22 +130,6 @@ final class WindowTracker {
                 appSize: appSize
             )
 
-            // Apply persisted minimum width so first layout allocates enough slices
-            if let screen = NSScreen.managed?.visibleFrame {
-                let sc = ScreenClass.current
-                let persistedMin = config.minSlicesFor(
-                    bundleId: app.bundleIdentifier,
-                    screenWidth: screen.width, gap: config.gap,
-                    totalSlices: sc.totalSlices
-                )
-                if persistedMin > 1 {
-                    tracked.minSliceCount = persistedMin
-                    if tracked.sliceCount < persistedMin {
-                        tracked.sliceCount = persistedMin
-                    }
-                }
-            }
-
             trackedWindows[windowId] = tracked
         }
 
