@@ -22,11 +22,11 @@ enum AppSize: String, Sendable, Codable, CaseIterable {
         case (.xs, _):            return 1
         case (.s,  _):            return 2
         case (.m,  .laptop):      return 4
-        case (.m,  .desktop):     return 2
-        case (.m,  .ultrawide):   return 3
+        case (.m,  .desktop):     return 3
+        case (.m,  .ultrawide):   return 4
         case (.l,  .laptop):      return 4
         case (.l,  .desktop):     return 3
-        case (.l,  .ultrawide):   return 3
+        case (.l,  .ultrawide):   return 5
         case (.xl, .laptop):      return 4
         case (.xl, .desktop):     return 4
         case (.xl, .ultrawide):   return 6
