@@ -7,9 +7,9 @@
 ./scripts/build-app.sh
 
 # Full local release (requires Apple credentials)
-APPLE_ID=$(hort get apple-id) \
+APPLE_ID=$(hort get apple id) \
 APPLE_TEAM_ID=N73TK4MNFF \
-APPLE_APP_SPECIFIC_PASSWORD=$(hort get apple-app-specific-password) \
+APPLE_APP_SPECIFIC_PASSWORD=$(hort get apple app_specific_password) \
 ./scripts/build-app.sh 0.2.0 --notarize --dmg
 ```
 
@@ -37,9 +37,9 @@ Set these at https://github.com/sebastian-breitzke/streifen/settings/secrets/act
 |---|---|---|
 | `CSC_LINK` | Base64-encoded `.p12` of Developer ID Application cert | See below |
 | `CSC_KEY_PASSWORD` | Password for the `.p12` | Set when exporting |
-| `APPLE_ID` | Apple ID email | `hort get apple-id` |
+| `APPLE_ID` | Apple ID email | `hort get apple id` |
 | `APPLE_TEAM_ID` | `N73TK4MNFF` | From Developer account |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password | `hort get apple-app-specific-password` |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password | `hort get apple app_specific_password` |
 | `HOMEBREW_TAP_GITHUB_TOKEN` | PAT with `repo` scope | Create at https://github.com/settings/tokens |
 
 ### Exporting the `.p12`

@@ -177,9 +177,9 @@ swift build
 ./scripts/build-app.sh
 
 # Full release (notarize + DMG)
-APPLE_ID=$(hort get apple-id) \
+APPLE_ID=$(hort get apple id) \
 APPLE_TEAM_ID=N73TK4MNFF \
-APPLE_APP_SPECIFIC_PASSWORD=$(hort get apple-app-specific-password) \
+APPLE_APP_SPECIFIC_PASSWORD=$(hort get apple app_specific_password) \
 ./scripts/build-app.sh 0.2.0 --notarize --dmg
 ```
 
